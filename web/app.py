@@ -27,7 +27,7 @@ def create_app():
                 template_folder=os.path.join(os.path.dirname(__file__), 'templates'),
                 static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 
-    app.secret_key = 'tinyprogrammer-secret-key'
+    app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24))
 
     # Initialize config manager
     config_mgr = ConfigManager()
