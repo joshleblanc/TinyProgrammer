@@ -179,7 +179,7 @@ def main():
                     screensaver.update()
                     screensaver.render(terminal.screen)
                     terminal.flush()
-                    terminal.tick(30)
+                    terminal.tick(15)
                 terminal.exit_screensaver_mode()
                 print("[Tiny Programmer] Clock in — back to work")
     except Exception as e:
