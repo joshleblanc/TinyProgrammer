@@ -96,7 +96,11 @@
 
 <div class="actions">
     <button onclick="restartProgram()" class="btn-primary">Restart Program</button>
-    <button onclick="toggleScreensaver()" class="btn-secondary">{{ 'Wake Up' if status.force_screensaver else 'Start Screensaver' }}</button>
+    {% if status.force_screensaver %}
+    <button onclick="screensaverOff()" class="btn-primary">Wake Up</button>
+    {% else %}
+    <button onclick="screensaverOn()" class="btn-secondary">Start Screensaver</button>
+    {% endif %}
     <a href="{{ url_for('dashboard') }}" class="btn-secondary">Refresh</a>
 </div>
 
@@ -114,16 +118,16 @@ function restartProgram() {
         })
         .catch(err => alert('Error: ' + err));
 }
-function toggleScreensaver() {
-    fetch('/api/screensaver', { method: 'POST' })
+function screensaverOn() {
+    fetch('/api/screensaver/on', { method: 'POST' })
         .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                alert('Error: ' + data.error);
-            }
-        })
+        .then(data => { if (data.success) setTimeout(() => location.reload(), 2000); })
+        .catch(err => alert('Error: ' + err));
+}
+function screensaverOff() {
+    fetch('/api/screensaver/off', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => { if (data.success) setTimeout(() => location.reload(), 2000); })
         .catch(err => alert('Error: ' + err));
 }
 </script>

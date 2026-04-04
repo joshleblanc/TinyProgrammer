@@ -59,13 +59,21 @@ def create_app():
             return jsonify({"success": True, "message": "Restart requested"})
         return jsonify({"error": "Brain not initialized"})
 
-    @app.route('/api/screensaver', methods=['POST'])
-    def api_screensaver():
-        """Toggle screensaver on/off manually."""
+    @app.route('/api/screensaver/on', methods=['POST'])
+    def api_screensaver_on():
+        """Start screensaver manually."""
         if _brain:
-            _brain._force_screensaver = not _brain._force_screensaver
-            state = "on" if _brain._force_screensaver else "off"
-            return jsonify({"success": True, "screensaver": state})
+            _brain._force_screensaver = True
+            _brain._restart_requested = True
+            return jsonify({"success": True, "screensaver": "on"})
+        return jsonify({"error": "Brain not initialized"})
+
+    @app.route('/api/screensaver/off', methods=['POST'])
+    def api_screensaver_off():
+        """Stop screensaver manually."""
+        if _brain:
+            _brain._force_screensaver = False
+            return jsonify({"success": True, "screensaver": "off"})
         return jsonify({"error": "Brain not initialized"})
 
     @app.route('/settings', methods=['GET', 'POST'])
