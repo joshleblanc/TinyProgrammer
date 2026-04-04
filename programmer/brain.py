@@ -86,6 +86,7 @@ class Brain:
         self.fix_attempts = 0
         self._restart_requested = False
         self._bbs_breaks_taken = 0
+        self._force_screensaver = False
 
     def request_restart(self):
         """Request a restart - skip to next program cycle."""
@@ -117,6 +118,7 @@ class Brain:
             "schedule_clock_in": getattr(config, "SCHEDULE_CLOCK_IN", 9),
             "schedule_clock_out": getattr(config, "SCHEDULE_CLOCK_OUT", 23),
             "is_clocked_in": self._is_clocked_in(hour),
+            "force_screensaver": self._force_screensaver,
         }
         return status
 
@@ -131,13 +133,18 @@ class Brain:
         else:
             return hour >= clock_in or hour < clock_out
 
-    def run(self):
+    def run(self, should_continue=None):
         """
-        Main loop. Runs forever.
-        
-        Transitions through states based on current state.
+        Main loop. Runs until should_continue returns False.
+
+        Args:
+            should_continue: callable returning bool. If None, runs forever.
         """
         while True:
+            if should_continue and not should_continue():
+                print("[Brain] Clock out time. Stopping.")
+                return
+
             try:
                 if self.state == State.BOOT:
                     self._do_boot()

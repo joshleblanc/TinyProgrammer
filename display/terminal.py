@@ -545,6 +545,26 @@ class Terminal:
         pass
 
     # =========================================================================
+    # Screensaver Mode
+    # =========================================================================
+
+    def enter_screensaver_mode(self):
+        """Switch to screensaver — blank the screen."""
+        if not self.mock_mode:
+            self.screen.fill((0, 0, 0))
+            self._flip(force=True)
+
+    def exit_screensaver_mode(self):
+        """Leave screensaver, restore IDE background."""
+        if not self.mock_mode and self.bg_image:
+            self.screen.blit(self.bg_image, (0, 0))
+            self._flip(force=True)
+
+    def flush(self):
+        """Push the current screen surface to the display."""
+        self._flip(force=True)
+
+    # =========================================================================
     # BBS Display Mode
     # =========================================================================
 
