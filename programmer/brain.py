@@ -455,10 +455,11 @@ class Brain:
         last_output = ""
         
         while time.time() - start_time < duration:
-            # Check for restart request
-            if self._restart_requested:
-                self._restart_requested = False
-                self.terminal.type_string("\n// Restart requested!\n")
+            # Check for restart or screensaver request
+            if self._restart_requested or self._force_screensaver:
+                if self._restart_requested:
+                    self._restart_requested = False
+                    self.terminal.type_string("\n// Restart requested!\n")
                 if self.current_process.poll() is None:
                     self.current_process.terminate()
                 break
