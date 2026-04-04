@@ -679,9 +679,7 @@ class Brain:
                     self._bbs_flat_board(board)
 
         except Exception as e:
-            import traceback
             print(f"[BBS] Break failed: {e}")
-            traceback.print_exc()
         finally:
             time.sleep(1)
             self.terminal.exit_bbs_mode()
