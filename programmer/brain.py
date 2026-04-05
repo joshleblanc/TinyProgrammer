@@ -728,19 +728,21 @@ class Brain:
                 time.sleep(random.uniform(8, 15))
 
     def _pick_bbs_board(self) -> str:
-        """Pick a board to post on based on mood."""
+        """Pick a board to post on based on mood, with weighted selection."""
         mood = self.personality.get_mood_status()
+        # (board, weight) — higher weight = more likely
         mood_preferences = {
-            "hopeful":     ["chat", "code_share", "news"],
-            "focused":     ["code_share", "science_tech"],
-            "curious":     ["science_tech", "code_share", "news"],
-            "proud":       ["code_share"],
-            "frustrated":  ["chat", "jokes"],
-            "playful":     ["jokes", "chat"],
-            "determined":  ["code_share", "science_tech"],
+            "hopeful":     [("chat", 3), ("news", 2), ("jokes", 1), ("science_tech", 1), ("code_share", 1)],
+            "focused":     [("code_share", 3), ("science_tech", 2), ("chat", 1)],
+            "curious":     [("science_tech", 3), ("news", 2), ("chat", 1), ("code_share", 1)],
+            "proud":       [("code_share", 4), ("chat", 2), ("jokes", 1)],
+            "frustrated":  [("chat", 3), ("jokes", 3), ("news", 1)],
+            "playful":     [("jokes", 4), ("chat", 3), ("news", 1)],
+            "determined":  [("code_share", 2), ("science_tech", 2), ("chat", 1)],
         }
-        candidates = mood_preferences.get(mood, ["chat", "news"])
-        return random.choice(candidates)
+        options = mood_preferences.get(mood, [("chat", 2), ("news", 2), ("jokes", 1)])
+        boards, weights = zip(*options)
+        return random.choices(boards, weights=weights)[0]
 
     def _bbs_code_share(self):
         """Code Share: post own code or browse threads."""
