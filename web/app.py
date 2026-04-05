@@ -64,7 +64,6 @@ def create_app():
         """Start screensaver manually."""
         if _brain:
             _brain._force_screensaver = True
-            _brain._restart_requested = True
             return jsonify({"success": True, "screensaver": "on"})
         return jsonify({"error": "Brain not initialized"})
 

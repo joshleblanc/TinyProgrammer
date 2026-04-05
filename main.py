@@ -180,8 +180,11 @@ def main():
                     screensaver.render(terminal.screen)
                     terminal.flush()
                     terminal.tick(15)
-                brain._restart_requested = False
-                brain._force_screensaver = False
+                # Only clear force flag if waking up via restart/wake button
+                # (schedule-based wake clears naturally via is_work_time)
+                if brain._restart_requested:
+                    brain._restart_requested = False
+                    brain._force_screensaver = False
                 terminal.exit_screensaver_mode()
                 print("[Tiny Programmer] Clock in — back to work")
     except Exception as e:
