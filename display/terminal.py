@@ -718,22 +718,31 @@ class Terminal:
         # Store for render methods
         self._bbs_content_y = content_y
 
-    def _bbs_render_scrolled(self, lines):
+    def _bbs_render_scrolled(self, lines, title=None):
         """Render lines with auto-scrolling inside the terminal draw area.
 
         Each entry in lines is (text, color_key) where color_key is
         'text', 'dim', 'accent', or 'separator'.
+        If title is set, it stays pinned at the top while lines scroll below.
         """
         if self.mock_mode:
             return
         colors = self._bbs_colors()
         lx = self._bbs_x + 8
         content_y = self._bbs_content_y + 4
+
+        # Reserve space for pinned title
+        title_rows = 0
+        if title:
+            title_rows = 2  # title line + separator
+            content_y += title_rows * self.char_height
+
         visible_h = self._bbs_max_y - content_y
         visible_rows = visible_h // self.char_height
 
-        # Render first screenful
+        # Draw pinned title + first screenful
         offset = 0
+        self._bbs_draw_title(title, colors, lx)
         self._bbs_draw_lines(lines, offset, visible_rows, colors, lx, content_y)
         self._flip(force=True)
 
@@ -748,12 +757,25 @@ class Terminal:
         while offset + visible_rows < len(lines):
             offset += 1
             self._bbs_clear_content()
+            self._bbs_draw_title(title, colors, lx)
             self._bbs_draw_lines(lines, offset, visible_rows, colors, lx, content_y)
             self._flip(force=True)
             time.sleep(random.uniform(0.15, 0.35))
 
         # Pause on last screenful
         time.sleep(random.uniform(1.5, 3.0))
+
+    def _bbs_draw_title(self, title, colors, lx):
+        """Draw the pinned board title at the top of the content area."""
+        if not title:
+            return
+        y = self._bbs_content_y + 4
+        surf = self.font.render(title, True, colors["accent"])
+        self.screen.blit(surf, (lx, y))
+        # Separator line below title
+        sep_y = y + self.char_height + 2
+        pygame.draw.line(self.screen, colors["border"],
+                         (lx, sep_y), (self._bbs_x + self._BBS_DRAW_W - 8, sep_y))
 
     def _bbs_draw_lines(self, lines, offset, visible_rows, colors, lx, start_y):
         """Draw a window of lines at the given offset."""
@@ -813,10 +835,13 @@ class Terminal:
             return
         self._bbs_clear_content()
 
-        lines = []
-        lines.append((f"--- {board.upper()} ---", "accent"))
-        lines.append(("", "text"))
+        board_titles = {
+            "chat": "Chat", "news": "News", "jokes": "Jokes",
+            "science_tech": "Science & Tech", "lurk_report": "Lurk Report",
+        }
+        title = f"--- {board_titles.get(board, board.upper())} ---"
 
+        lines = []
         for p in posts:
             author = p.get("author", "?")
             content = p.get("content", "")
@@ -825,7 +850,7 @@ class Terminal:
                 lines.append((wrapped, "text"))
             lines.append(("", "text"))
 
-        self._bbs_render_scrolled(lines)
+        self._bbs_render_scrolled(lines, title=title)
 
     def render_bbs_thread_list(self, threads):
         """Render Code Share thread listing."""
@@ -834,15 +859,12 @@ class Terminal:
         self._bbs_clear_content()
 
         lines = []
-        lines.append(("--- CODE SHARE ---", "accent"))
-        lines.append(("", "text"))
-
         for i, t in enumerate(threads):
             title = t.get("title", "untitled")[:40]
             author = t.get("author", "?")
             lines.append((f"  {i+1:2d}. {title}  ({author})", "text"))
 
-        self._bbs_render_scrolled(lines)
+        self._bbs_render_scrolled(lines, title="--- Code Share ---")
 
     def render_bbs_thread_detail(self, detail):
         """Render a thread's top post and replies with auto-scrolling."""
@@ -850,16 +872,13 @@ class Terminal:
             return
         self._bbs_clear_content()
 
-        lines = []
         post = detail.get("post", {})
-        title = post.get("title", "untitled")
+        post_title = post.get("title", "untitled")
         author = post.get("author", "?")
+        pinned_title = f"[{post_title}] by {author}"
 
-        lines.append((f"[{title}] by {author}", "accent"))
-        lines.append(("", "text"))
-
+        lines = []
         content = post.get("content", "")
-        max_chars = self._bbs_cols - 2
         for code_line in content.split("\n"):
             for wrapped in self._bbs_wrap(code_line):
                 lines.append((wrapped, "text"))
@@ -874,7 +893,7 @@ class Terminal:
                 lines.append((wrapped, "dim"))
             lines.append(("", "text"))
 
-        self._bbs_render_scrolled(lines)
+        self._bbs_render_scrolled(lines, title=pinned_title)
 
     def render_bbs_compose(self, context):
         """Show the multi-line compose area in the bottom of the terminal."""
