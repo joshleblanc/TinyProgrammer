@@ -767,7 +767,7 @@ class Terminal:
             # Check if a post break just scrolled into view
             visible_end = offset + visible_rows - 1
             if visible_end in post_breaks:
-                time.sleep(random.uniform(3.0, 5.0))
+                time.sleep(5.0)
             else:
                 time.sleep(random.uniform(0.15, 0.35))
 
