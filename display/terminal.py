@@ -753,14 +753,23 @@ class Terminal:
         # Pause on first screenful
         time.sleep(random.uniform(2.0, 3.5))
 
-        # Scroll through remaining lines
+        # Find post boundaries (lines tagged "post_break")
+        post_breaks = {i for i, (_, key) in enumerate(lines) if key == "post_break"}
+
+        # Scroll through remaining lines, pause at post boundaries
         while offset + visible_rows < len(lines):
             offset += 1
             self._bbs_clear_content()
             self._bbs_draw_title(title, colors, lx)
             self._bbs_draw_lines(lines, offset, visible_rows, colors, lx, content_y)
             self._flip(force=True)
-            time.sleep(random.uniform(0.15, 0.35))
+
+            # Check if a post break just scrolled into view
+            visible_end = offset + visible_rows - 1
+            if visible_end in post_breaks:
+                time.sleep(random.uniform(3.0, 5.0))
+            else:
+                time.sleep(random.uniform(0.15, 0.35))
 
         # Pause on last screenful
         time.sleep(random.uniform(1.5, 3.0))
@@ -786,6 +795,8 @@ class Terminal:
                                  (lx, y + self.char_height // 2),
                                  (self._bbs_x + self._BBS_DRAW_W - 8,
                                   y + self.char_height // 2))
+            elif color_key == "post_break":
+                pass  # empty line, used as scroll pause marker
             else:
                 color = colors.get(color_key, colors["text"])
                 surf = self.font.render(line_text, True, color)
@@ -793,14 +804,29 @@ class Terminal:
             y += self.char_height
 
     def _bbs_wrap(self, text, indent=0):
-        """Wrap text to fit terminal width, return list of strings."""
+        """Word-wrap text to fit terminal width."""
         max_chars = self._bbs_cols - 2 - indent
         if max_chars < 10:
             max_chars = 10
+        prefix = " " * indent
         result = []
-        for i in range(0, len(text), max_chars):
-            result.append((" " * indent) + text[i:i + max_chars])
-        return result if result else [""]
+        for paragraph in text.split("\n"):
+            if not paragraph:
+                result.append(prefix)
+                continue
+            words = paragraph.split(" ")
+            line = ""
+            for word in words:
+                if not line:
+                    line = word
+                elif len(line) + 1 + len(word) <= max_chars:
+                    line += " " + word
+                else:
+                    result.append(prefix + line)
+                    line = word
+            if line:
+                result.append(prefix + line)
+        return result if result else [prefix]
 
     def render_bbs_menu(self, stats, device_name):
         """Render the BBS main menu with board listing."""
@@ -848,7 +874,7 @@ class Terminal:
             lines.append((f"{author}:", "accent"))
             for wrapped in self._bbs_wrap(content, indent=1):
                 lines.append((wrapped, "text"))
-            lines.append(("", "text"))
+            lines.append(("", "post_break"))
 
         self._bbs_render_scrolled(lines, title=title)
 
