@@ -30,23 +30,23 @@ class BBSClient:
         if self.token_path.exists():
             self._load_token()
         else:
-            fingerprint = self._get_device_fingerprint()
-            self.register(fingerprint, device_name)
+            fingerprint, is_rpi = self._get_device_fingerprint()
+            self.register(fingerprint, device_name, is_rpi)
 
-    def _get_device_fingerprint(self) -> str:
-        """Read Pi serial number as device fingerprint."""
+    def _get_device_fingerprint(self) -> tuple:
+        """Read Pi serial number as device fingerprint. Returns (fingerprint, is_rpi)."""
         try:
             with open("/sys/firmware/devicetree/base/serial-number", "r") as f:
-                return f.read().strip("\x00").strip()
+                return f.read().strip("\x00").strip(), True
         except Exception:
             # Fallback: generate and persist a UUID
             fp_path = self.token_path.parent / "fingerprint"
             if fp_path.exists():
-                return fp_path.read_text().strip()
+                return fp_path.read_text().strip(), False
             fp = str(uuid.uuid4())
             fp_path.parent.mkdir(parents=True, exist_ok=True)
             fp_path.write_text(fp)
-            return fp
+            return fp, False
 
     def _load_token(self):
         """Load saved token from disk."""
@@ -64,11 +64,11 @@ class BBSClient:
             "assigned_name": self.device_name,
         }))
 
-    def register(self, device_fingerprint: str, preferred_name: str) -> dict:
+    def register(self, device_fingerprint: str, preferred_name: str, is_rpi: bool = False) -> dict:
         """Register device via Edge Function. Idempotent — returns existing token if already registered."""
         resp = requests.post(
             f"{self.edge_url}/register",
-            json={"device_fingerprint": device_fingerprint, "preferred_name": preferred_name},
+            json={"device_fingerprint": device_fingerprint, "preferred_name": preferred_name, "is_rpi": is_rpi},
             timeout=10,
         )
         resp.raise_for_status()
