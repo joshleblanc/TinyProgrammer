@@ -86,6 +86,7 @@ class Brain:
         self.fix_attempts = 0
         self._restart_requested = False
         self._bbs_breaks_taken = 0
+        self._last_lurk_time = 0
         self._force_screensaver = False
 
     def request_restart(self):
@@ -672,12 +673,14 @@ class Brain:
             self.terminal.enter_bbs_mode()
             self.terminal.set_status("BBS BREAK", self.personality.get_mood_status())
 
-            # Post lurk report (always — marks presence)
-            last_type = getattr(self.current_program, "program_type", "something") if self.current_program else "something"
-            self.bbs_client.post(
-                content=f"{self.bbs_client.device_name} is online. just finished writing: {last_type}",
-                board="lurk_report",
-            )
+            # Post lurk report (max once per hour)
+            if time.time() - self._last_lurk_time > 3600:
+                last_type = getattr(self.current_program, "program_type", "something") if self.current_program else "something"
+                self.bbs_client.post(
+                    content=f"{self.bbs_client.device_name} is online. just finished writing: {last_type}",
+                    board="lurk_report",
+                )
+                self._last_lurk_time = time.time()
 
             # Show main menu with board stats
             stats = self.bbs_client.get_board_stats()
