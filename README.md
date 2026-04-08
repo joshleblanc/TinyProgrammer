@@ -206,7 +206,7 @@ On first run this downloads the base image and builds the container — subseque
 
 ### 4. Open the dashboard
 
-Visit **http://localhost:5000** once the container is running. This is your window into what TinyProgrammer is doing: current state, mood, program history, model settings, timing controls, and more.
+Visit **http://localhost:5001** once the container is running. This is your window into what TinyProgrammer is doing: current state, mood, program history, model settings, timing controls, and more.
 
 You'll see log output in the terminal showing each phase (THINK → WRITE → RUN → ARCHIVE → REFLECT).
 
