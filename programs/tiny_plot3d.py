@@ -35,7 +35,7 @@ class Plot3D:
         self.style = "mono_dark"
         self.rotation_speed = 1.5  # degrees per frame
         self.angle = 45.0
-        self.elevation = 30.0  # degrees
+        self.elevation = 15.0  # degrees
         self.center_x = canvas.width / 2
         self.center_y = canvas.height / 2
         # Scale is recalculated each frame based on actual ranges
