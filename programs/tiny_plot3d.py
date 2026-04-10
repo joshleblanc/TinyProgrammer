@@ -32,7 +32,7 @@ class Plot3D:
         self.x_range = (-5.0, 5.0)
         self.y_range = (-5.0, 5.0)
         self.steps = 15
-        self.style = "height"
+        self.style = "mono_light"
         self.line_color = None  # override for fg; None uses style default
         self.rotation_speed = 1.5  # degrees per frame
         self.angle = 45.0
@@ -301,9 +301,7 @@ class Plot3D:
         return z_values, z_min, z_max
 
     def _draw_surface(self, z_values, z_min, z_max):
-        """Draw the wireframe mesh."""
-        colors = self.STYLES[self.style]
-        fg = self.line_color if self.line_color else colors["fg"]
+        """Draw the wireframe mesh with z-height green hue gradient."""
         x0, x1 = self.x_range
         y0, y1 = self.y_range
         n = self.steps
@@ -323,11 +321,8 @@ class Plot3D:
             for i in range(n):
                 p1 = projected[i][j]
                 p2 = projected[i + 1][j]
-                if self.style == "height":
-                    avg_z = (z_values[i][j] + z_values[i + 1][j]) / 2
-                    color = self._height_color(avg_z, z_min, z_max)
-                else:
-                    color = fg
+                avg_z = (z_values[i][j] + z_values[i + 1][j]) / 2
+                color = self._height_color(avg_z, z_min, z_max)
                 self.c.line(p1[0], p1[1], p2[0], p2[1], *color)
 
         # Draw columns (lines along y for fixed i)
@@ -335,11 +330,8 @@ class Plot3D:
             for j in range(n):
                 p1 = projected[i][j]
                 p2 = projected[i][j + 1]
-                if self.style == "height":
-                    avg_z = (z_values[i][j] + z_values[i][j + 1]) / 2
-                    color = self._height_color(avg_z, z_min, z_max)
-                else:
-                    color = fg
+                avg_z = (z_values[i][j] + z_values[i][j + 1]) / 2
+                color = self._height_color(avg_z, z_min, z_max)
                 self.c.line(p1[0], p1[1], p2[0], p2[1], *color)
 
     # =========================================================================
