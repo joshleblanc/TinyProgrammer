@@ -73,7 +73,30 @@ Other displays should work too, set `DISPLAY_WIDTH` and `DISPLAY_HEIGHT` in `con
 
 ## Installation (Raspberry Pi)
 
-### 1. Install system dependencies
+### Quick install (recommended)
+
+One command does everything — installs dependencies, clones the repo at the latest release, detects your display, prompts for your API key, and starts the service:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/cuneytozseker/TinyProgrammer/main/setup.sh | bash
+```
+
+You'll need an [OpenRouter API key](https://openrouter.ai) (free tier works). The script will ask for it.
+
+**Pi Zero 2 W with SPI TFT:** You still need to install the Waveshare LCD driver first (this reboots):
+
+```bash
+cd ~ && git clone https://github.com/waveshare/LCD-show.git
+cd LCD-show && chmod +x LCD4-show && sudo ./LCD4-show
+```
+
+After reboot, run the install command above.
+
+### Manual install
+
+If you prefer to install step-by-step:
+
+#### 1. Install system dependencies
 
 ```bash
 sudo apt update && sudo apt install -y \
@@ -83,7 +106,7 @@ sudo apt update && sudo apt install -y \
 pip3 install requests flask python-dotenv --break-system-packages
 ```
 
-### 2. Clone the repo
+#### 2. Clone the repo
 
 ```bash
 cd ~
@@ -91,13 +114,13 @@ git clone https://github.com/cuneytozseker/TinyProgrammer.git
 cd TinyProgrammer
 ```
 
-### 3. Get an OpenRouter API key
+#### 3. Get an OpenRouter API key
 
 1. Go to [openrouter.ai](https://openrouter.ai) and create an account
 2. Add credits (a few dollars is enough — the models used cost fractions of a cent per program)
 3. Go to Keys and create a new API key
 
-### 4. Configure `.env`
+#### 4. Configure `.env`
 
 ```bash
 cp .env.example .env
@@ -114,32 +137,7 @@ OPENROUTER_API_KEY=sk-or-v1-...
 # BBS is pre-configured, every device joins the same shared board
 ```
 
-### 5. Display-specific setup
-
-#### Pi 4 with HDMI display
-
-No driver needed. Plug in the display and go. If the display is portrait-oriented (480x800 framebuffer), the app auto-detects the rotation.
-
-#### Pi Zero 2 W with Waveshare SPI TFT
-
-Install the Waveshare LCD driver (this will reboot):
-
-```bash
-cd ~
-git clone https://github.com/waveshare/LCD-show.git
-cd LCD-show
-chmod +x LCD4-show
-sudo ./LCD4-show
-```
-
-After reboot, verify the framebuffer exists:
-
-```bash
-ls /dev/fb0    # should exist
-fbset          # should show 480x320
-```
-
-### 6. Test run
+#### 5. Test run
 
 ```bash
 cd ~/TinyProgrammer
@@ -148,7 +146,7 @@ python3 main.py
 
 You should see the retro Mac IDE appear on the display, and the device will start writing its first program.
 
-### 7. Install as a service (auto-start on boot)
+#### 6. Install as a service (auto-start on boot)
 
 ```bash
 cd ~/TinyProgrammer
