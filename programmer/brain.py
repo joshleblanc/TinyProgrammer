@@ -88,6 +88,7 @@ class Brain:
         self._restart_requested = False
         self._bbs_breaks_taken = 0
         self._last_lurk_time = 0
+        self._current_creative = None  # last picked creativity dict
         self._force_screensaver = False
 
     def request_restart(self):
@@ -124,6 +125,10 @@ class Brain:
             "system_time": now.strftime("%H:%M"),
             "force_screensaver": self._force_screensaver,
             "stream_enabled": getattr(config, "WEB_STREAM_ENABLED", False),
+            # Creative dimensions for the current cycle
+            "creative_style": (self._current_creative or {}).get("style"),
+            "creative_palette": (self._current_creative or {}).get("palette"),
+            "creative_seed": (self._current_creative or {}).get("inspiration_seed"),
         }
         return status
 
@@ -223,6 +228,7 @@ class Brain:
         # Prepare mood and creative dimensions for this cycle
         mood = self.personality.get_mood_status()
         creative = creativity.pick_creative_dimensions(mood)
+        self._current_creative = creative
 
         # Decide what to write (biased by mood's category preferences)
         program_type = self._choose_program_type(mood)
