@@ -89,7 +89,11 @@ class Brain:
         self._restart_requested = False
         self._bbs_breaks_taken = 0
         self._last_lurk_time = 0
-        self._current_creative = None  # last picked creativity dict
+        self._current_creative = None
+        self._current_variation = None
+        self._current_prompt = None
+        self._last_program_type = None
+        self.current_process = None
         self._force_screensaver = False
         self.liked_store = LikedStore()
 
@@ -563,7 +567,7 @@ class Brain:
             self.current_process.terminate()
             try:
                 self.current_process.wait(timeout=1.0)
-            except:
+            except Exception:
                 self.current_process.kill()
             self.current_program.success = True
             self._transition(State.ARCHIVE)
