@@ -114,6 +114,25 @@ h2 {
     text-transform: uppercase;
 }
 
+.like-heart {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    font-size: 1.4rem;
+    color: #ccc;
+    cursor: pointer;
+    transition: color 0.15s;
+    line-height: 1;
+}
+
+.like-heart:hover {
+    color: #e74c3c;
+}
+
+.like-heart.liked {
+    color: #e74c3c;
+}
+
 .status-value {
     font-size: 1.5rem;
     font-weight: bold;
