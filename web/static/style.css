@@ -75,6 +75,12 @@ h2 {
     border: 1px solid #c3e6cb;
 }
 
+.message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
 /* Live display preview */
 .preview-container {
     margin-bottom: 1.5rem;
@@ -298,6 +304,116 @@ h2 {
 
 .weight-input {
     width: 60px !important;
+}
+
+/* Program type section heading + master toggle */
+.section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.section-heading h2 {
+    margin: 1.5rem 0 0.25rem;
+}
+
+.master-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    color: #34495e;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* Program type editor rows */
+.type-row {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border-left: 3px solid #bdc3c7;
+}
+
+.type-row.custom {
+    border-left-color: #2980b9;
+}
+
+.type-row-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.type-row-header label {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.type-row-header .slug {
+    color: #7f8c8d;
+    font-size: 0.85rem;
+    font-family: monospace;
+}
+
+.type-row .desc-row {
+    display: block;
+    width: 100%;
+}
+
+.type-row textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.type-row-meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.type-row-meta select {
+    padding: 0.25rem;
+}
+
+.btn-delete {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    padding: 0.25rem 0.6rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.btn-delete:hover {
+    background: #c0392b;
+}
+
+.add-custom-type {
+    padding: 1rem;
+    background: #ecf0f1;
+    border-radius: 4px;
+    margin-top: 1rem;
+}
+
+.add-custom-type .form-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+
+.add-custom-type .form-row > div {
+    flex: 1;
+    min-width: 120px;
 }
 
 /* Buttons */

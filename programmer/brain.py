@@ -257,8 +257,16 @@ class Brain:
             self._current_variation = liked
             print(f"[Brain] Variation: remixing liked {program_type}")
         elif roll < variation_prob + core_prob:
-            # Core mode: pick from core list, no creative dimensions
-            core_programs = getattr(config, "CORE_PROGRAMS", [])
+            # Core mode: pick from core list (built-ins + user-opted customs),
+            # filtered to currently-enabled types. No creative dimensions.
+            core_programs = list(getattr(config, "CORE_PROGRAMS", []))
+            customs = getattr(config, "CUSTOM_PROGRAM_TYPES", None) or {}
+            for slug, meta in customs.items():
+                if meta.get("core") and slug not in core_programs:
+                    core_programs.append(slug)
+            enabled = {t for t, _ in getattr(config, "PROGRAM_TYPES", [])}
+            if enabled:
+                core_programs = [p for p in core_programs if p in enabled] or core_programs
             last = getattr(self, "_last_program_type", None)
             choices = [p for p in core_programs if p != last] or core_programs
             program_type = random.choice(choices)

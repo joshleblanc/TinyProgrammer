@@ -81,13 +81,17 @@ class ConfigManager:
         return success
 
     def _apply_to_config(self, updates: Dict[str, Any]):
-        """Apply overrides to the live config module."""
+        """Apply overrides to the live config module.
+
+        Applies every key — if config.py doesn't already declare it, the
+        attribute is created so downstream code can still read it via
+        getattr(config, KEY, default).
+        """
         import config
 
         for key, value in updates.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-                print(f"[ConfigManager] Updated config.{key} = {value}")
+            setattr(config, key, value)
+            print(f"[ConfigManager] Updated config.{key} = {value}")
 
     def reset(self, key: str = None):
         """Reset override(s) to defaults."""

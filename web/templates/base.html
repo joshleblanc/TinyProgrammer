@@ -18,7 +18,7 @@
 
     <main>
         {% if message %}
-        <div class="message success">{{ message }}</div>
+        <div class="message {{ message_type|default('success') }}">{{ message }}</div>
         {% endif %}
 
         {% block content %}{% endblock %}

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}Prompt Editor - TinyProgrammer{% endblock %}
+{% block title %}Program Types - TinyProgrammer{% endblock %}
 
 {% block content %}
-<h1>Prompt Editor</h1>
-<p>Customize the descriptions used to generate each program type.</p>
+<h1>Program Types & Prompts</h1>
+<p>Enable/disable program types, adjust weights, edit their prompt descriptions, and define your own custom types.</p>
 
 <form method="POST" action="{{ url_for('prompt_editor') }}">
 
@@ -36,37 +36,173 @@
         </div>
     </section>
 
-    <section class="settings-section">
-        <h2>Program Descriptions</h2>
-        <p class="hint">Each description completes the sentence: "Write a short Python program that..."</p>
-
-        {% set program_types = [
-            'bouncing_ball', 'pong', 'orbit_system', 'pendulum', 'spring_chain',
-            'particle_fountain', 'gravity_well', 'flock',
-            'game_of_life', 'cellular_automata', 'wire_world', 'ant_trail',
-            'langton_ant', 'voronoi_grow',
-            'pattern', 'generative_glyphs', 'l_system', 'fractal_tree',
-            'tile_weaver', 'mandala', 'plasma',
-            'rain', 'starfield', 'fire', 'lightning', 'snow', 'waves', 'aurora',
-            'spiral', 'random_walker', 'animation', 'brush_strokes',
-            'geometric_drift', 'color_fields', 'warp_grid',
-            'wireframe_plot',
-        ] %}
-
-        {% for ptype in program_types %}
-        <div class="form-group">
-            <label for="desc_{{ ptype }}">{{ ptype|replace('_', ' ')|title }}</label>
-            <textarea name="desc_{{ ptype }}" id="desc_{{ ptype }}"
-                      rows="2" class="description-input"
-                      placeholder="{{ defaults.get(ptype, '') }}">{{ descriptions.get(ptype, defaults.get(ptype, '')) }}</textarea>
-            <small class="default-hint">Default: {{ defaults.get(ptype, 'N/A') }}</small>
+    {% macro builtin_row(slug) %}
+        {% set weight = enabled_weights.get(slug, 1) %}
+        {% set enabled = slug in enabled_weights %}
+        <div class="type-row">
+            <div class="type-row-header">
+                <input type="checkbox" name="ptype_{{ slug }}" id="ptype_{{ slug }}"
+                       class="section-child" data-section="{{ kwargs.get('section') }}"
+                       {% if enabled %}checked{% endif %}>
+                <label for="ptype_{{ slug }}">{{ slug|replace('_', ' ')|title }}</label>
+                <span class="slug">{{ slug }}</span>
+                <label>Weight
+                    <input type="number" name="pweight_{{ slug }}"
+                           value="{{ weight }}" min="1" max="10" class="weight-input">
+                </label>
+            </div>
+            <div class="desc-row">
+                <textarea name="desc_{{ slug }}" rows="2" class="description-input"
+                          placeholder="{{ defaults.get(slug, '') }}">{{ descriptions.get(slug, '') }}</textarea>
+                <small class="default-hint">Default: {{ defaults.get(slug, 'N/A') }}</small>
+            </div>
         </div>
-        {% endfor %}
+    {% endmacro %}
+
+    <section class="settings-section">
+        <div class="section-heading">
+            <h2>Core Programs</h2>
+            <label class="master-toggle">
+                <input type="checkbox" class="section-master" data-section="core">
+                <span>Enable all</span>
+            </label>
+        </div>
+        <p class="hint">These appear in the ~50% "core" rotation (simpler prompt, no creative dimensions).</p>
+        {% for slug in core_slugs %}{{ builtin_row(slug, section='core') }}{% endfor %}
+    </section>
+
+    <section class="settings-section">
+        <div class="section-heading">
+            <h2>Creative Programs</h2>
+            <label class="master-toggle">
+                <input type="checkbox" class="section-master" data-section="creative">
+                <span>Enable all</span>
+            </label>
+        </div>
+        <p class="hint">These only appear in the ~35% "creative" rotation with full style/palette/mood direction.</p>
+        {% for slug in creative_slugs %}{{ builtin_row(slug, section='creative') }}{% endfor %}
+    </section>
+
+    <section class="settings-section">
+        <div class="section-heading">
+            <h2>Custom Program Types</h2>
+            <label class="master-toggle">
+                <input type="checkbox" class="section-master" data-section="custom">
+                <span>Enable all</span>
+            </label>
+        </div>
+        <p class="hint">Your user-defined types. These appear in the ~35% "creative" rotation by default — raise the weight, or tick "Include in core" to also surface them in the core pool (~50% of cycles).</p>
+
+        {% if custom_types %}
+            {% for slug, meta in custom_types.items() %}
+            {% set weight = enabled_weights.get(slug, 1) %}
+            {% set enabled = slug in enabled_weights %}
+            <div class="type-row custom">
+                <div class="type-row-header">
+                    <input type="checkbox" name="ptype_{{ slug }}" id="ptype_{{ slug }}"
+                           class="section-child" data-section="custom"
+                           {% if enabled %}checked{% endif %}>
+                    <label for="ptype_{{ slug }}">{{ slug|replace('_', ' ')|title }}</label>
+                    <span class="slug">{{ slug }}</span>
+                    <label>Weight
+                        <input type="number" name="pweight_{{ slug }}"
+                               value="{{ weight }}" min="1" max="10" class="weight-input">
+                    </label>
+                </div>
+                <div class="desc-row">
+                    <textarea name="desc_{{ slug }}" rows="2" class="description-input"
+                              placeholder="does something interesting">{{ descriptions.get(slug, meta.description or '') }}</textarea>
+                </div>
+                <div class="type-row-meta">
+                    <label>Category
+                        <select name="custom_cat_{{ slug }}">
+                            <option value="">(none)</option>
+                            {% for cat in categories %}
+                            <option value="{{ cat }}" {% if meta.category == cat %}selected{% endif %}>{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <input type="checkbox" name="custom_core_{{ slug }}"
+                               {% if meta.core %}checked{% endif %}>
+                        Include in core
+                    </label>
+                    <button type="submit" name="delete" value="{{ slug }}" class="btn-delete"
+                            onclick="return confirm('Delete custom type &quot;{{ slug }}&quot;?');">
+                        Delete
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="hint"><em>No custom types yet. Add one below.</em></p>
+        {% endif %}
+
+        <div class="add-custom-type">
+            <h3>Add Custom Type</h3>
+            <div class="form-row">
+                <div>
+                    <label for="new_slug">Slug</label>
+                    <input type="text" name="new_slug" id="new_slug"
+                           placeholder="audio_visualizer"
+                           pattern="[a-z0-9_]{1,40}"
+                           title="Lowercase letters, digits, underscores. 1-40 chars.">
+                </div>
+                <div>
+                    <label for="new_cat">Category</label>
+                    <select name="new_cat" id="new_cat">
+                        <option value="">(none)</option>
+                        {% for cat in categories %}
+                        <option value="{{ cat }}">{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="flex: 0 0 auto; align-self: center;">
+                    <label>
+                        <input type="checkbox" name="new_core">
+                        Include in core
+                    </label>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top: 0.5rem;">
+                <label for="new_desc">Description <small>(completes "Write a short Python program that...")</small></label>
+                <textarea name="new_desc" id="new_desc" rows="2" class="description-input"
+                          placeholder="renders an audio-like waveform across the canvas"></textarea>
+            </div>
+            <small class="hint">Slugs cannot collide with built-in types. Click "Save" below to add.</small>
+        </div>
     </section>
 
     <div class="form-actions">
-        <button type="submit" class="btn-primary">Save Prompts</button>
+        <button type="submit" class="btn-primary">Save</button>
         <a href="{{ url_for('prompt_editor') }}" class="btn-secondary">Reset Form</a>
     </div>
 </form>
+
+<script>
+(function () {
+    const sections = ['core', 'creative', 'custom'];
+    sections.forEach(function (name) {
+        const master = document.querySelector('.section-master[data-section="' + name + '"]');
+        const children = document.querySelectorAll('.section-child[data-section="' + name + '"]');
+        if (!master || children.length === 0) return;
+
+        function refreshMaster() {
+            let checked = 0;
+            children.forEach(function (c) { if (c.checked) checked += 1; });
+            master.checked = checked === children.length;
+            master.indeterminate = checked > 0 && checked < children.length;
+        }
+
+        master.addEventListener('change', function () {
+            children.forEach(function (c) { c.checked = master.checked; });
+            master.indeterminate = false;
+        });
+        children.forEach(function (c) {
+            c.addEventListener('change', refreshMaster);
+        });
+        refreshMaster();
+    });
+})();
+</script>
 {% endblock %}

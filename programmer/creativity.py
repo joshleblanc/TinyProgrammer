@@ -8,6 +8,8 @@ selection helpers.
 
 import random
 
+import config
+
 
 # =============================================================================
 # Program type categories (for mood biasing)
@@ -210,6 +212,7 @@ def pick_program_type(mood: str, program_types: list, last_type: str = None) -> 
     mood_data = MOOD_CREATIVITY.get(mood, MOOD_CREATIVITY["hopeful"])
     preferred_cats = mood_data.get("categories")
 
+    customs = getattr(config, "CUSTOM_PROGRAM_TYPES", None) or {}
     names = []
     weights = []
     for ptype, w in program_types:
@@ -217,7 +220,7 @@ def pick_program_type(mood: str, program_types: list, last_type: str = None) -> 
             continue
         names.append(ptype)
         if preferred_cats:
-            cat = TYPE_TO_CATEGORY.get(ptype)
+            cat = TYPE_TO_CATEGORY.get(ptype) or customs.get(ptype, {}).get("category")
             if cat in preferred_cats:
                 weights.append(w * 4)
             else:

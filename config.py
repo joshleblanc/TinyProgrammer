@@ -250,6 +250,18 @@ PROGRAM_TYPES = [
     ("wireframe_plot", 1),
 ]
 
+# User-defined description overrides (slug -> description string).
+# Empty by default; populated from config_overrides.json via the web UI.
+# Resolution order at prompt-build time: this dict → CUSTOM_PROGRAM_TYPES
+# entry → llm.generator.PROGRAM_DESCRIPTIONS built-in defaults.
+PROGRAM_DESCRIPTIONS = {}
+
+# User-defined custom program types (slug -> {"description", "category", "core"}).
+# "category" is one of the keys in creativity.CATEGORIES or None.
+# "core" (bool) opts the type into the core-mode rotation pool alongside
+# CORE_PROGRAMS. Empty by default; managed via the web UI.
+CUSTOM_PROGRAM_TYPES = {}
+
 # Maximum lines of code to generate
 MAX_PROGRAM_LINES = 50
 

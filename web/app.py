@@ -6,6 +6,7 @@ Runs in a background thread alongside the main programmer loop.
 """
 
 import os
+import re
 import time
 import threading
 from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
@@ -177,16 +178,7 @@ def create_app():
             updates['TYPO_PROBABILITY'] = float(request.form.get('typo_probability', 0.02))
             updates['PAUSE_PROBABILITY'] = float(request.form.get('pause_probability', 0.05))
 
-            # Program types (checkboxes) — scan form keys directly so we
-            # pick up every checked type regardless of current config override.
-            program_types = []
-            for key in request.form:
-                if key.startswith('ptype_'):
-                    ptype = key[len('ptype_'):]
-                    weight = int(request.form.get(f'pweight_{ptype}', 1))
-                    program_types.append((ptype, weight))
-            if program_types:
-                updates['PROGRAM_TYPES'] = program_types
+            # Program types live on the /prompt page now; see prompt_editor().
 
             # Color scheme (display adjustment layer)
             color_scheme = request.form.get('color_scheme', 'none')
@@ -242,51 +234,177 @@ def create_app():
 
     @app.route('/prompt', methods=['GET', 'POST'])
     def prompt_editor():
-        """Prompt editor - customize program descriptions."""
+        """Program types & prompt editor — manage built-in and custom types."""
+        import config as _config
+        from llm.generator import PROGRAM_DESCRIPTIONS as DEFAULT_DESCRIPTIONS
+        from programmer.creativity import CATEGORIES
+
+        builtin_slugs = list(DEFAULT_DESCRIPTIONS.keys())
+        builtin_set = set(builtin_slugs)
+        core_set = set(getattr(_config, 'CORE_PROGRAMS', []))
+        # Keep declared order: core first (in CORE_PROGRAMS order), then the rest
+        core_slugs = [s for s in _config.CORE_PROGRAMS if s in builtin_set]
+        creative_slugs = [s for s in builtin_slugs if s not in core_set]
+        category_names = list(CATEGORIES.keys())
+
         message = None
+        message_type = 'success'
+
         if request.method == 'POST':
-            updates = {}
+            current = config_mgr.get_all()
+            custom_types = dict(current.get('CUSTOM_PROGRAM_TYPES') or {})
+            current_descriptions = dict(current.get('PROGRAM_DESCRIPTIONS') or {})
 
-            # Program descriptions — scan form keys directly so we
-            # pick up every type regardless of current config override.
-            descriptions = {}
-            for key in request.form:
-                if key.startswith('desc_'):
-                    ptype = key[len('desc_'):]
-                    desc = request.form[key].strip()
-                    if desc:
-                        descriptions[ptype] = desc
+            # --- Delete a custom type ---------------------------------------
+            delete_slug = request.form.get('delete')
+            if delete_slug:
+                if delete_slug in custom_types:
+                    custom_types.pop(delete_slug, None)
+                    current_descriptions.pop(delete_slug, None)
+                    # Drop from enabled list too
+                    remaining_types = [
+                        (t, w) for (t, w) in (current.get('PROGRAM_TYPES') or [])
+                        if t != delete_slug
+                    ]
+                    # Purge liked entries referencing the deleted slug
+                    if _brain is not None and getattr(_brain, 'liked_store', None):
+                        try:
+                            _brain.liked_store.purge_type(delete_slug)
+                        except Exception as e:
+                            print(f"[PromptEditor] purge_type failed: {e}")
+                    config_mgr.save_overrides({
+                        'CUSTOM_PROGRAM_TYPES': custom_types,
+                        'PROGRAM_DESCRIPTIONS': current_descriptions,
+                        'PROGRAM_TYPES': remaining_types,
+                    })
+                    message = f"Deleted custom type '{delete_slug}'."
+                else:
+                    message = f"Unknown custom type '{delete_slug}'."
+                    message_type = 'error'
+            else:
+                # --- Regular save ------------------------------------------
+                errors = []
 
-            if descriptions:
-                updates['PROGRAM_DESCRIPTIONS'] = descriptions
+                # Gather enable + weight for all types (built-in + existing customs)
+                program_types = []
+                for key in request.form:
+                    if key.startswith('ptype_'):
+                        slug = key[len('ptype_'):]
+                        try:
+                            weight = int(request.form.get(f'pweight_{slug}', 1))
+                        except ValueError:
+                            weight = 1
+                        weight = max(1, min(10, weight))
+                        program_types.append((slug, weight))
 
-            # Canvas constraints
-            canvas_width = request.form.get('canvas_width', '416')
-            canvas_height = request.form.get('canvas_height', '218')
-            canvas_sleep = request.form.get('canvas_sleep', '0.1')
-            updates['CANVAS_CONSTRAINTS'] = {
-                'width': int(canvas_width),
-                'height': int(canvas_height),
-                'sleep': float(canvas_sleep)
-            }
+                # Descriptions (per-type textareas)
+                descriptions = {}
+                for key in request.form:
+                    if key.startswith('desc_'):
+                        slug = key[len('desc_'):]
+                        desc = request.form[key].strip()
+                        if len(desc) > 500:
+                            errors.append(f"Description for '{slug}' is over 500 characters.")
+                            continue
+                        if desc:
+                            descriptions[slug] = desc
 
-            config_mgr.save_overrides(updates)
-            message = "Prompts saved! Changes will apply on next program."
+                # Update custom-type category + core flags from existing rows
+                for slug in list(custom_types.keys()):
+                    cat = request.form.get(f'custom_cat_{slug}', '').strip() or None
+                    if cat and cat not in CATEGORIES:
+                        errors.append(f"Invalid category '{cat}' for '{slug}'.")
+                        cat = custom_types[slug].get('category')
+                    custom_types[slug] = {
+                        'description': descriptions.get(slug, custom_types[slug].get('description', '')),
+                        'category': cat,
+                        'core': f'custom_core_{slug}' in request.form,
+                    }
 
-        # Load current config
+                # --- Add new custom type -----------------------------------
+                new_slug = (request.form.get('new_slug') or '').strip().lower()
+                new_desc = (request.form.get('new_desc') or '').strip()
+                new_cat = (request.form.get('new_cat') or '').strip() or None
+                new_core = 'new_core' in request.form
+
+                if new_slug or new_desc:
+                    if not new_slug:
+                        errors.append("New custom type needs a slug.")
+                    elif not _valid_slug(new_slug):
+                        errors.append("Slug must be lowercase letters, digits, or underscores (1-40 chars).")
+                    elif new_slug in builtin_set:
+                        errors.append(f"Slug '{new_slug}' collides with a built-in type.")
+                    elif new_slug in custom_types:
+                        errors.append(f"Custom type '{new_slug}' already exists.")
+                    elif not new_desc:
+                        errors.append("New custom type needs a description.")
+                    elif len(new_desc) > 500:
+                        errors.append("New description is over 500 characters.")
+                    elif new_cat and new_cat not in CATEGORIES:
+                        errors.append(f"Invalid category '{new_cat}'.")
+                    else:
+                        custom_types[new_slug] = {
+                            'description': new_desc,
+                            'category': new_cat,
+                            'core': new_core,
+                        }
+                        descriptions[new_slug] = new_desc
+                        # Enabled by default with weight 1
+                        if not any(t == new_slug for t, _ in program_types):
+                            program_types.append((new_slug, 1))
+
+                # Canvas constraints
+                try:
+                    canvas_constraints = {
+                        'width': int(request.form.get('canvas_width', 416)),
+                        'height': int(request.form.get('canvas_height', 218)),
+                        'sleep': float(request.form.get('canvas_sleep', 0.1)),
+                    }
+                except ValueError:
+                    errors.append("Canvas constraints must be numeric.")
+                    canvas_constraints = current.get('CANVAS_CONSTRAINTS')
+
+                if errors:
+                    message = " ".join(errors)
+                    message_type = 'error'
+                else:
+                    updates = {
+                        'PROGRAM_TYPES': program_types,
+                        'PROGRAM_DESCRIPTIONS': descriptions,
+                        'CUSTOM_PROGRAM_TYPES': custom_types,
+                        'CANVAS_CONSTRAINTS': canvas_constraints,
+                    }
+                    config_mgr.save_overrides(updates)
+                    message = "Saved! Changes apply on the next program cycle."
+
+        # --- Render ---------------------------------------------------------
         current = config_mgr.get_all()
-
-        # Get default descriptions from generator
-        from llm.generator import PROGRAM_DESCRIPTIONS
-        descriptions = current.get('PROGRAM_DESCRIPTIONS', PROGRAM_DESCRIPTIONS)
+        enabled_weights = dict(current.get('PROGRAM_TYPES') or [])
+        custom_types = current.get('CUSTOM_PROGRAM_TYPES') or {}
+        # Merged view: overrides on top of built-in defaults
+        descriptions = dict(DEFAULT_DESCRIPTIONS)
+        descriptions.update(current.get('PROGRAM_DESCRIPTIONS') or {})
 
         return render_template('prompt.html',
+                             core_slugs=core_slugs,
+                             creative_slugs=creative_slugs,
+                             enabled_weights=enabled_weights,
+                             custom_types=custom_types,
                              descriptions=descriptions,
-                             defaults=PROGRAM_DESCRIPTIONS,
+                             defaults=DEFAULT_DESCRIPTIONS,
+                             categories=category_names,
                              config=current,
-                             message=message)
+                             message=message,
+                             message_type=message_type)
 
     return app
+
+
+_SLUG_RE = re.compile(r'^[a-z0-9_]{1,40}$')
+
+
+def _valid_slug(slug: str) -> bool:
+    return bool(_SLUG_RE.match(slug))
 
 
 def start_web_server(brain, host='0.0.0.0', port=5000):

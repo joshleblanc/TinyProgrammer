@@ -306,7 +306,7 @@ class LLMGenerator:
         if self.model_name.startswith("ollama/"):
             return self._build_simple_prompt(program_type, creative)
 
-        description = PROGRAM_DESCRIPTIONS.get(program_type, "does something interesting")
+        description = _resolve_description(program_type)
 
         # Add learned lessons if available
         lessons_text = ""
@@ -368,7 +368,7 @@ class LLMGenerator:
         Only includes: program type, palette, rules, API. No style, no seed,
         no mood directive, no creative direction block.
         """
-        description = PROGRAM_DESCRIPTIONS.get(program_type, "does something interesting")
+        description = _resolve_description(program_type)
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
 
@@ -492,7 +492,24 @@ class LLMGenerator:
         return prompt
 
 
-# Program type descriptions for prompts
+def _resolve_description(program_type: str) -> str:
+    """Resolve the prompt description for a program type.
+
+    Order: user override (config.PROGRAM_DESCRIPTIONS) → custom-type entry
+    (config.CUSTOM_PROGRAM_TYPES) → built-in default (PROGRAM_DESCRIPTIONS) →
+    generic fallback string.
+    """
+    overrides = getattr(config, "PROGRAM_DESCRIPTIONS", None) or {}
+    if program_type in overrides:
+        return overrides[program_type]
+    customs = getattr(config, "CUSTOM_PROGRAM_TYPES", None) or {}
+    custom = customs.get(program_type)
+    if custom and custom.get("description"):
+        return custom["description"]
+    return PROGRAM_DESCRIPTIONS.get(program_type, "does something interesting")
+
+
+# Program type descriptions for prompts (built-in defaults)
 PROGRAM_DESCRIPTIONS = {
     # Motion & Physics
     "bouncing_ball": "animates a ball bouncing around the canvas",

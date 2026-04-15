@@ -19,6 +19,13 @@ COLOR_SCHEMES = {
     "warm": {"mode": "multiply", "color": (255, 220, 180), "intensity": 0.45},
     "night": {"mode": "multiply", "color": (255, 50, 50), "intensity": 0.6},
     "inverted": {"mode": "invert", "color": None, "intensity": 1.0},
+    # Monochrome schemes: desaturate to luminance first, then tint. Unlike
+    # the "multiply" schemes above these throw away the canvas's color info,
+    # producing a classic one-color CRT/e-ink look.
+    "mono": {"mode": "desaturate", "color": (255, 255, 255), "intensity": 1.0},
+    "mono_amber": {"mode": "desaturate", "color": (255, 176, 0), "intensity": 1.0},
+    "mono_green": {"mode": "desaturate", "color": (0, 255, 80), "intensity": 1.0},
+    "mono_blue": {"mode": "desaturate", "color": (80, 140, 255), "intensity": 1.0},
 }
 
 
@@ -52,6 +59,8 @@ def apply_color_adjustment(r, g, b, scheme_name):
         return apply_overlay(r, g, b, color, intensity)
     elif mode == "invert":
         return apply_invert(r, g, b, intensity)
+    elif mode == "desaturate":
+        return apply_desaturate(r, g, b, color, intensity)
 
     return r, g, b
 
@@ -144,6 +153,33 @@ def apply_invert(r, g, b, intensity):
     r_out = np.clip(r * (1 - intensity) + r_inv * intensity, 0, 255).astype(np.uint16)
     g_out = np.clip(g * (1 - intensity) + g_inv * intensity, 0, 255).astype(np.uint16)
     b_out = np.clip(b * (1 - intensity) + b_inv * intensity, 0, 255).astype(np.uint16)
+
+    return r_out, g_out, b_out
+
+
+def apply_desaturate(r, g, b, color, intensity):
+    """
+    Desaturate to luminance, then tint by the given color.
+
+    Formula: lum = 0.299*R + 0.587*G + 0.114*B (Rec. 601)
+             output = lum * color / 255
+    Then blend with original based on intensity.
+    """
+    cr, cg, cb = color
+
+    r_f = r.astype(np.float32)
+    g_f = g.astype(np.float32)
+    b_f = b.astype(np.float32)
+
+    lum = 0.299 * r_f + 0.587 * g_f + 0.114 * b_f
+
+    r_tint = lum * cr / 255.0
+    g_tint = lum * cg / 255.0
+    b_tint = lum * cb / 255.0
+
+    r_out = np.clip(r_f * (1 - intensity) + r_tint * intensity, 0, 255).astype(np.uint16)
+    g_out = np.clip(g_f * (1 - intensity) + g_tint * intensity, 0, 255).astype(np.uint16)
+    b_out = np.clip(b_f * (1 - intensity) + b_tint * intensity, 0, 255).astype(np.uint16)
 
     return r_out, g_out, b_out
 

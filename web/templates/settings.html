@@ -113,37 +113,7 @@
 
     <section class="settings-section">
         <h2>Program Types</h2>
-        <p class="hint">Enable/disable program types and set their weights (higher = more likely).</p>
-
-        <div class="program-types-grid">
-            {% set default_types = [
-                'bouncing_ball', 'pong', 'orbit_system', 'pendulum', 'spring_chain',
-                'particle_fountain', 'gravity_well', 'flock',
-                'game_of_life', 'cellular_automata', 'wire_world', 'ant_trail',
-                'langton_ant', 'voronoi_grow',
-                'pattern', 'generative_glyphs', 'l_system', 'fractal_tree',
-                'tile_weaver', 'mandala', 'plasma',
-                'rain', 'starfield', 'fire', 'lightning', 'snow', 'waves', 'aurora',
-                'spiral', 'random_walker', 'animation', 'brush_strokes',
-                'geometric_drift', 'color_fields', 'warp_grid',
-                'wireframe_plot',
-            ] %}
-            {% set current_types = config.PROGRAM_TYPES or [] %}
-            {% set current_dict = dict(current_types) %}
-
-            {% for ptype in default_types %}
-            <div class="program-type-item">
-                <label>
-                    <input type="checkbox" name="ptype_{{ ptype }}"
-                           {% if ptype in current_dict %}checked{% endif %}>
-                    {{ ptype|replace('_', ' ')|title }}
-                </label>
-                <input type="number" name="pweight_{{ ptype }}"
-                       value="{{ current_dict.get(ptype, 1) }}"
-                       min="1" max="10" class="weight-input">
-            </div>
-            {% endfor %}
-        </div>
+        <p class="hint">Program types, weights, and prompt descriptions — including custom types — are managed on the <a href="{{ url_for('prompt_editor') }}">Prompts</a> page.</p>
     </section>
 
     <section class="settings-section">
@@ -161,7 +131,11 @@
                     'cool': 'Cool',
                     'warm': 'Warm',
                     'night': 'Night Mode (Red)',
-                    'inverted': 'Inverted'
+                    'inverted': 'Inverted',
+                    'mono': 'Monochrome (Gray)',
+                    'mono_amber': 'Monochrome Amber',
+                    'mono_green': 'Monochrome Green',
+                    'mono_blue': 'Monochrome Blue'
                 } %}
                 {% for scheme in color_schemes %}
                 <option value="{{ scheme }}" {% if config.COLOR_SCHEME == scheme %}selected{% endif %}>

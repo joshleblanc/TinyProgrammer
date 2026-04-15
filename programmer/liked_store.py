@@ -58,3 +58,12 @@ class LikedStore:
 
     def count(self) -> int:
         return len(self._items)
+
+    def purge_type(self, program_type: str) -> int:
+        """Remove all liked entries whose type matches. Returns count purged."""
+        before = len(self._items)
+        self._items = [i for i in self._items if i.get("type") != program_type]
+        removed = before - len(self._items)
+        if removed:
+            self._save()
+        return removed
