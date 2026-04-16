@@ -147,6 +147,7 @@ def create_app():
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
         """Settings page - view and edit configuration."""
+        import config
         from llm.generator import AVAILABLE_MODELS, DEFAULT_MODEL, SURPRISE_ME
 
         message = None
@@ -164,6 +165,7 @@ def create_app():
 
             updates['LLM_TEMPERATURE'] = float(request.form.get('llm_temperature', 0.7))
             updates['LLM_MAX_TOKENS'] = int(request.form.get('llm_max_tokens', 512))
+            updates['LLM_THINKING'] = request.form.get('llm_thinking', 'off')
 
             # Timing settings
             updates['WATCH_DURATION_MIN'] = int(request.form.get('watch_duration_min', 120))

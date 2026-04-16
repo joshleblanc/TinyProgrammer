@@ -28,6 +28,7 @@ AVAILABLE_MODELS = {
     "deepseek/deepseek-v3.2": ("DeepSeek V3.2", "DeepSeek"),
     # Cloud models (MiniMax) - require MINIMAX_API_KEY
     "minimax/MiniMax-M2.7": ("MiniMax M2.7", "M2.7"),
+    "minimax/MiniMax-M2.7-highspeed": ("MiniMax M2.7 Highspeed", "M2.7-HS"),
     # Local models (Ollama) - require Ollama running locally
     # EXPERIMENTAL: Local models may be slow and produce lower quality code on Pi4
     # Install: curl -fsSL https://ollama.com/install.sh | sh
@@ -291,17 +292,18 @@ class LLMGenerator:
 
     def _stream_minimax(self, prompt: str, max_tokens: int,
                         temperature: float, stop: list) -> Generator[str, None, None]:
-        """Stream from MiniMax API."""
+        """Stream from MiniMax API via Anthropic-compatible endpoint."""
         model = self.model_name.replace("minimax/", "")
         api_key = self._get_api_key()
         if not api_key:
             raise Exception("MiniMax API key not set. Set MINIMAX_API_KEY in .env")
 
-        url = f"https://api.minimax.io/v1/text/chatcompletion_v2"
+        url = "https://api.minimax.io/anthropic/v1/messages"
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01"
         }
 
         data = {
@@ -309,19 +311,19 @@ class LLMGenerator:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": [
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": [{"type": "text", "text": prompt}]}
             ],
             "stream": True
         }
 
-        # Add seed if set (same seed for retries, new seed for new programs)
-        if self.current_seed is not None:
-            data["stream_skip_generate"] = False
+        # Add thinking config if enabled (matches pi-ai budget levels)
+        thinking_level = getattr(config, 'LLM_THINKING', 'off')
+        if thinking_level != 'off':
+            budget_map = {'low': 2048, 'medium': 8192, 'high': 16384}
+            budget = budget_map.get(thinking_level, 1024)
+            data['thinking'] = {"type": "enabled", "budget_tokens": budget}
 
-        if stop:
-            data["stop"] = stop
-
-        print(f"[LLM] Sending request to MiniMax ({model}) [seed: {self.current_seed}]")
+        print(f"[LLM] Sending request to MiniMax Anthropic API ({model}) [seed: {self.current_seed}]")
 
         try:
             with requests.post(url, headers=headers, json=data, stream=True, timeout=(10, 60)) as response:
@@ -334,24 +336,25 @@ class LLMGenerator:
                 elif response.status_code >= 400:
                     raise Exception(f"MiniMax request error! (err: {response.status_code})")
 
-                for line in response.iter_lines():
-                    if line:
-                        decoded = line.decode('utf-8')
-                        if decoded.startswith('data: '):
-                            data_str = decoded[6:]
-                            if data_str == '[DONE]':
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                                # MiniMax streaming format
-                                choices = chunk.get('choices', [])
-                                if choices:
-                                    delta = choices[0].get('delta', {})
-                                    text = delta.get('content', '')
+                raw_body = response.text
+
+                for line in raw_body.split('\n'):
+                    line = line.strip()
+                    if line.startswith('data: '):
+                        data_str = line[6:]
+                        if data_str == '[DONE]':
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            chunk_type = chunk.get('type')
+                            if chunk_type == 'content_block_delta':
+                                delta = chunk.get('delta', {})
+                                if delta.get('type') == 'text_delta':
+                                    text = delta.get('text', '')
                                     if text:
                                         yield text
-                            except json.JSONDecodeError:
-                                pass
+                        except json.JSONDecodeError:
+                            pass
         except requests.exceptions.Timeout:
             raise Exception("MiniMax timed out!")
         except requests.exceptions.HTTPError as e:

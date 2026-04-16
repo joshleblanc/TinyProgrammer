@@ -115,15 +115,21 @@ def main():
     )
     
     # Initialize LLM
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
     _llm_model = getattr(config, "LLM_MODEL", "")
-    # Fall back to MiniMax API key if using a minimax model
     if _llm_model.startswith("minimax/"):
         api_key = os.environ.get("MINIMAX_API_KEY", "")
-    if not api_key and not _llm_model.startswith("ollama/"):
-        _fatal_config_error(terminal, "OPENROUTER_API_KEY is not set.",
-                            "Add it to your .env file (or docker-compose.yml env).",
-                            "Get a free key at openrouter.ai")
+        if not api_key:
+            _fatal_config_error(terminal, "MINIMAX_API_KEY is not set.",
+                                "Add it to your .env file (or docker-compose.yml env).",
+                                "Get a key at platform.minimaxi.com")
+    elif not _llm_model.startswith("ollama/"):
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not api_key:
+            _fatal_config_error(terminal, "OPENROUTER_API_KEY is not set.",
+                                "Add it to your .env file (or docker-compose.yml env).",
+                                "Get a free key at openrouter.ai")
+    else:
+        api_key = ""
 
     llm = LLMGenerator(
         api_key=api_key,

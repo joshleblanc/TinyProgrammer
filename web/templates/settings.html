@@ -36,7 +36,17 @@
             <label for="llm_max_tokens">Max Tokens</label>
             <input type="number" name="llm_max_tokens" id="llm_max_tokens"
                    value="{{ config.LLM_MAX_TOKENS or 512 }}"
-                   min="256" max="4096">
+                   min="256">
+        </div>
+
+        <div class="form-group">
+            <label for="llm_thinking">Thinking Level</label>
+            <select name="llm_thinking" id="llm_thinking">
+                <option value="off" {% if config.LLM_THINKING == 'off' %}selected{% endif %}>Off</option>
+                <option value="low" {% if config.LLM_THINKING == 'low' %}selected{% endif %}>Low (2K tokens)</option>
+                <option value="medium" {% if config.LLM_THINKING == 'medium' %}selected{% endif %}>Medium (8K tokens)</option>
+                <option value="high" {% if config.LLM_THINKING == 'high' %}selected{% endif %}>High (16K tokens)</option>
+            </select>
         </div>
     </section>
 
