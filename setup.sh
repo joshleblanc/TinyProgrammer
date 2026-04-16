@@ -6,7 +6,7 @@ set -e
 
 REPO="https://github.com/joshleblanc/TinyProgrammer.git"
 INSTALL_DIR="$HOME/TinyProgrammer"
-BRANCH="${TINYPROGRAMMER_BRANCH:-master}"
+BRANCH="${TINYPROGRAMMER_BRANCH:-main}"
 
 # Colors
 R='\033[0;31m'
