@@ -210,9 +210,10 @@ def create_app():
         # Load current config
         current = config_mgr.get_all()
 
-        # Get current model from brain if available
-        current_model = DEFAULT_MODEL
-        if _brain and hasattr(_brain, 'llm'):
+        # Get current model from config (source of truth for persistence)
+        # Falls back to brain's LLM if brain not available (e.g., first startup)
+        current_model = getattr(config, 'LLM_MODEL', DEFAULT_MODEL)
+        if not current_model and _brain and hasattr(_brain, 'llm'):
             current_model = _brain.llm.get_current_model()
 
         # Build models dict with display names for template
