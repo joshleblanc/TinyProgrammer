@@ -6,7 +6,7 @@ set -e
 
 REPO="https://github.com/joshleblanc/TinyProgrammer.git"
 INSTALL_DIR="$HOME/TinyProgrammer"
-TAG="${TINYPROGRAMMER_TAG:-v0.1}"
+BRANCH="${TINYPROGRAMMER_BRANCH:-master}"
 
 # Colors
 R='\033[0;31m'
@@ -55,13 +55,14 @@ pip3 install --quiet --break-system-packages requests flask python-dotenv 2>/dev
   pip3 install --quiet requests flask python-dotenv
 
 # 5. Clone or update repo
-echo -e "${B}[4/7]${N} Fetching TinyProgrammer ${TAG}..."
+echo -e "${B}[4/7]${N} Fetching TinyProgrammer ${BRANCH}..."
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   cd "$INSTALL_DIR"
-  git fetch --tags --quiet
-  git checkout "$TAG" --quiet
+  git fetch origin --quiet
+  git checkout "$BRANCH" --quiet
+  git pull --quiet origin "$BRANCH"
 else
-  git clone --quiet --depth 1 --branch "$TAG" "$REPO" "$INSTALL_DIR"
+  git clone --quiet --depth 1 --branch "$BRANCH" "$REPO" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
