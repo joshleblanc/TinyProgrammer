@@ -16,7 +16,7 @@ import config
 
 
 # Available models {model_id: (display_name, short_name)}
-# Cloud models via OpenRouter, local models via Ollama (prefix: "ollama/")
+# Cloud models via OpenRouter or MiniMax, local models via Ollama (prefix: "ollama/")
 # Note: Reasoning models removed - they use tokens on thinking, not code
 AVAILABLE_MODELS = {
     # Cloud models (OpenRouter) - require OPENROUTER_API_KEY
@@ -26,6 +26,8 @@ AVAILABLE_MODELS = {
     "openai/gpt-4.1-mini": ("GPT-4.1 Mini", "GPT-4.1"),
     "x-ai/grok-code-fast-1": ("Grok Code Fast", "Grok"),
     "deepseek/deepseek-v3.2": ("DeepSeek V3.2", "DeepSeek"),
+    # Cloud models (MiniMax) - require MINIMAX_API_KEY
+    "minimax/MiniMax-M2.7": ("MiniMax M2.7", "M2.7"),
     # Local models (Ollama) - require Ollama running locally
     # EXPERIMENTAL: Local models may be slow and produce lower quality code on Pi4
     # Install: curl -fsSL https://ollama.com/install.sh | sh
@@ -92,6 +94,12 @@ class LLMGenerator:
         self.model_name = random.choice(cloud_models)
         print(f"[LLM] Surprise! Selected: {self.get_short_name()}")
 
+    def _get_api_key(self) -> str:
+        """Get the appropriate API key for the current model provider."""
+        if self.model_name.startswith("minimax/"):
+            return os.environ.get("MINIMAX_API_KEY", "") or self.api_key
+        return self.api_key
+
     def set_model(self, model_name: str):
         """Change the current model (or set to surprise_me mode)."""
         self.model_setting = model_name
@@ -148,6 +156,8 @@ class LLMGenerator:
         """
         if self.model_name.startswith("ollama/"):
             yield from self._stream_ollama(prompt, max_tokens, temperature, stop)
+        elif self.model_name.startswith("minimax/"):
+            yield from self._stream_minimax(prompt, max_tokens, temperature, stop)
         else:
             yield from self._stream_openrouter(prompt, max_tokens, temperature, stop)
 
@@ -277,6 +287,85 @@ class LLMGenerator:
             if "Ollama" in str(e):
                 raise
             print(f"[LLM] Error streaming from Ollama: {e}")
+            raise
+
+    def _stream_minimax(self, prompt: str, max_tokens: int,
+                        temperature: float, stop: list) -> Generator[str, None, None]:
+        """Stream from MiniMax API."""
+        model = self.model_name.replace("minimax/", "")
+        api_key = self._get_api_key()
+        if not api_key:
+            raise Exception("MiniMax API key not set. Set MINIMAX_API_KEY in .env")
+
+        url = f"https://api.minimax.io/v1/text/chatcompletion_v2"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+
+        data = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "stream": True
+        }
+
+        # Add seed if set (same seed for retries, new seed for new programs)
+        if self.current_seed is not None:
+            data["stream_skip_generate"] = False
+
+        if stop:
+            data["stop"] = stop
+
+        print(f"[LLM] Sending request to MiniMax ({model}) [seed: {self.current_seed}]")
+
+        try:
+            with requests.post(url, headers=headers, json=data, stream=True, timeout=(10, 60)) as response:
+                if response.status_code == 401:
+                    raise Exception("MiniMax auth failed! Check your API key.")
+                elif response.status_code == 429:
+                    raise Exception("MiniMax rate limited! (err: 429)")
+                elif response.status_code >= 500:
+                    raise Exception(f"MiniMax server error! (err: {response.status_code})")
+                elif response.status_code >= 400:
+                    raise Exception(f"MiniMax request error! (err: {response.status_code})")
+
+                for line in response.iter_lines():
+                    if line:
+                        decoded = line.decode('utf-8')
+                        if decoded.startswith('data: '):
+                            data_str = decoded[6:]
+                            if data_str == '[DONE]':
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                                # MiniMax streaming format
+                                choices = chunk.get('choices', [])
+                                if choices:
+                                    delta = choices[0].get('delta', {})
+                                    text = delta.get('content', '')
+                                    if text:
+                                        yield text
+                            except json.JSONDecodeError:
+                                pass
+        except requests.exceptions.Timeout:
+            raise Exception("MiniMax timed out!")
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response else 0
+            if status == 401:
+                raise Exception("MiniMax auth failed! Check your API key.")
+            elif status == 429:
+                raise Exception("MiniMax rate limited! (err: 429)")
+            else:
+                raise Exception(f"MiniMax HTTP error! (err: {status})")
+        except Exception as e:
+            if "MiniMax" in str(e) or "auth" in str(e) or "rate" in str(e):
+                raise
+            print(f"[LLM] Error streaming from MiniMax: {e}")
             raise
 
     def get_header(self, program_type: str = "") -> str:
