@@ -36,8 +36,9 @@ AVAILABLE_MODELS = {
 # Ollama endpoint (can override via env)
 OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://localhost:11434")
 
-# Special mode for random model selection (cloud models only)
+# Special modes for random model selection
 SURPRISE_ME = "surprise_me"
+SURPRISE_ME_LOCAL = "surprise_me_local"
 
 # Default model
 DEFAULT_MODEL = "surprise_me"
@@ -82,21 +83,36 @@ class LLMGenerator:
         self._last_request_time = 0
         self.current_seed = None  # Seed for current program
 
-        # If surprise_me, pick a random model now
+        # If surprise mode, pick a random model now
         if self.model_setting == SURPRISE_ME:
-            self._pick_random_model()
+            self._pick_random_cloud_model()
+        elif self.model_setting == SURPRISE_ME_LOCAL:
+            self._pick_random_local_model()
 
-    def _pick_random_model(self):
+    def _pick_random_cloud_model(self):
         """Pick a random cloud model (exclude local ollama models)."""
         cloud_models = [k for k in AVAILABLE_MODELS.keys() if not k.startswith("ollama/")]
         self.model_name = random.choice(cloud_models)
         print(f"[LLM] Surprise! Selected: {self.get_short_name()}")
 
+    def _pick_random_local_model(self):
+        """Pick a random locally available Ollama model."""
+        available, models = detect_ollama_models()
+        if available and models:
+            raw = random.choice(models)
+            self.model_name = f"ollama/{raw}"
+            print(f"[LLM] Surprise (local)! Selected: {raw}")
+        else:
+            print("[LLM] No local models available, falling back to cloud")
+            self._pick_random_cloud_model()
+
     def set_model(self, model_name: str):
-        """Change the current model (or set to surprise_me mode)."""
+        """Change the current model (or set to a surprise mode)."""
         self.model_setting = model_name
         if model_name == SURPRISE_ME:
-            self._pick_random_model()
+            self._pick_random_cloud_model()
+        elif model_name == SURPRISE_ME_LOCAL:
+            self._pick_random_local_model()
         elif model_name in AVAILABLE_MODELS:
             self.model_name = model_name
             print(f"[LLM] Switched to model: {AVAILABLE_MODELS[model_name][0]}")
@@ -115,7 +131,9 @@ class LLMGenerator:
         print(f"[LLM] New seed: {self.current_seed}")
 
         if self.model_setting == SURPRISE_ME:
-            self._pick_random_model()
+            self._pick_random_cloud_model()
+        elif self.model_setting == SURPRISE_ME_LOCAL:
+            self._pick_random_local_model()
 
     def get_current_model(self) -> str:
         """Get the current model setting (may be 'surprise_me')."""

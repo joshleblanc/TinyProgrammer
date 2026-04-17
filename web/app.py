@@ -147,7 +147,7 @@ def create_app():
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
         """Settings page - view and edit configuration."""
-        from llm.generator import AVAILABLE_MODELS, DEFAULT_MODEL, SURPRISE_ME
+        from llm.generator import AVAILABLE_MODELS, DEFAULT_MODEL, SURPRISE_ME, SURPRISE_ME_LOCAL
 
         message = None
         if request.method == 'POST':
@@ -218,6 +218,7 @@ def create_app():
         # Build models dict with display names for template
         models_for_template = {}
         models_for_template[SURPRISE_ME] = "Surprise Me!"
+        models_for_template[SURPRISE_ME_LOCAL] = "Surprise Me! (Local)"
         for k, v in AVAILABLE_MODELS.items():
             models_for_template[k] = v[0]  # v is (display_name, short_name)
 
