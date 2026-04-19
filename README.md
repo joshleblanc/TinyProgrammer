@@ -409,6 +409,20 @@ ls -la /dev/fb0
 
 **Quick fixes:** set `DISPLAY_PROFILE=pi4-hdmi` in `.env` for HDMI displays, `pizero-spi` for SPI screens. Make sure the service runs as root (it needs framebuffer access).
 
+### Display shows the desktop instead of TinyProgrammer
+
+TinyProgrammer writes directly to the Linux framebuffer (`/dev/fb0`), not a desktop window. If the Pi boots into a desktop environment (X11/LXDE), it takes over the framebuffer and paints over TinyProgrammer's output.
+
+```bash
+# Option 1: Stop the desktop temporarily
+sudo systemctl stop lightdm
+sudo systemctl restart tinyprogrammer
+
+# Option 2: Boot to CLI permanently (recommended)
+sudo raspi-config
+# → System Options → Boot / Auto Login → Console Autologin
+```
+
 ### Web dashboard not loading
 
 The dashboard runs on port 5000 and can take 15-20 seconds to start on a Pi Zero.
