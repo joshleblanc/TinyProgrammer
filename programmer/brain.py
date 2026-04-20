@@ -92,7 +92,9 @@ class Brain:
         self._current_creative = None
         self._current_variation = None
         self._current_prompt = None
+        self._current_mode = None  # "variation", "core", or "creative"
         self._last_program_type = None
+        self._session_history = []  # resets each restart
         self.current_process = None
         self._force_screensaver = False
         self.liked_store = LikedStore()
@@ -138,6 +140,7 @@ class Brain:
             # Like system
             "is_variation": getattr(self, "_current_variation", None) is not None,
             "liked_count": self.liked_store.count(),
+            "session_history": list(reversed(self._session_history)),
         }
         return status
 
@@ -255,6 +258,7 @@ class Brain:
             program_type = liked["type"]
             self._current_creative = None
             self._current_variation = liked
+            self._current_mode = "variation"
             print(f"[Brain] Variation: remixing liked {program_type}")
         elif roll < variation_prob + core_prob:
             # Core mode: pick from core list (built-ins + user-opted customs),
@@ -273,12 +277,14 @@ class Brain:
             self._last_program_type = program_type
             self._current_creative = None
             self._current_variation = None
+            self._current_mode = "core"
             print(f"[Brain] Core: {program_type}")
         else:
             # Creative mode: full creativity system
             creative = creativity.pick_creative_dimensions(mood)
             self._current_creative = creative
             self._current_variation = None
+            self._current_mode = "creative"
             program_type = self._choose_program_type(mood)
             seed_str = creative.get("inspiration_seed") or "none"
             print(f"[Brain] Creative: style={creative['style']}, palette={creative['palette']}, seed={seed_str}")
@@ -723,6 +729,15 @@ class Brain:
         
         self.personality.update_mood(self.current_program.success)
         self.programs_written += 1
+
+        import datetime
+        self._session_history.append({
+            "type": self.current_program.program_type,
+            "mode": self._current_mode or "?",
+            "success": self.current_program.success,
+            "time": datetime.datetime.now().strftime("%H:%M"),
+            "model": self.llm.get_short_name(),
+        })
         
         time.sleep(1)
         self._transition(State.REFLECT)
