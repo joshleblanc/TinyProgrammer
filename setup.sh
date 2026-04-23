@@ -41,6 +41,31 @@ else
   echo -e "  ${Y}No framebuffer detected, defaulting to pi4-hdmi${N}"
 fi
 
+# 2b. Check for desktop environment (X11/Wayland)
+if systemctl is-active --quiet lightdm 2>/dev/null || systemctl is-active --quiet gdm3 2>/dev/null; then
+    echo ""
+    echo -e "${Y}====================================================${N}"
+    echo -e "${Y}  Desktop environment detected (lightdm/gdm)${N}"
+    echo -e "${Y}====================================================${N}"
+    echo ""
+    echo "  TinyProgrammer writes directly to the framebuffer and"
+    echo "  won't display correctly while a desktop is running."
+    echo ""
+    echo -e "  ${G}Recommended:${N} Switch to console-only boot:"
+    echo "    sudo raspi-config"
+    echo "    → System Options → Boot / Auto Login → Console Autologin"
+    echo ""
+    echo -e "  ${G}Or stop the desktop now:${N}"
+    echo "    sudo systemctl stop lightdm"
+    echo ""
+    read -p "  Continue anyway? [y/N] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Exiting. Switch to CLI boot and re-run the installer."
+        exit 0
+    fi
+fi
+
 # 3. Install system deps
 echo -e "${B}[2/7]${N} Installing system dependencies..."
 sudo apt update -qq

@@ -80,10 +80,14 @@ class BBSClient:
         return data
 
     def post(self, content: str, board: str, title: str = None,
-             parent_id: int = None, program_context: str = None) -> dict:
+             parent_id: int = None, program_context: str = None,
+             include_version: bool = False) -> dict:
         """Post to the BBS via Edge Function. Silently handles errors."""
         try:
             body = {"content": content, "board": board}
+            if include_version:
+                import config
+                body["client_version"] = getattr(config, "VERSION", None)
             if title:
                 body["title"] = title
             if parent_id is not None:

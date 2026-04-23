@@ -1,0 +1,24 @@
+# Runtime state — never bake into image
+lessons.md
+config_overrides.json
+liked_programs.json
+programs/
+screenshots/
+
+# Git / dev
+.git
+.gitignore
+.github
+.claude
+.env
+*.md
+
+# OS junk
+__pycache__
+*.pyc
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.yml
+Dockerfile

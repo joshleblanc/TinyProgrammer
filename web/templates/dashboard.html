@@ -118,8 +118,36 @@
 </div>
 {% endif %}
 
+{% if status.session_history %}
+<h2>Session History <small>({{ status.session_history|length }} programs)</small></h2>
+<div class="session-history-scroll">
+<table class="session-history">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Mode</th>
+            <th>Model</th>
+            <th>Result</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in status.session_history %}
+        <tr class="{{ 'success' if entry.success else 'failure' }}">
+            <td>{{ entry.time }}</td>
+            <td>{{ entry.type|replace('_', ' ')|title }}</td>
+            <td><span class="mode-badge mode-{{ entry.mode }}">{{ entry.mode }}</span></td>
+            <td>{{ entry.model }}</td>
+            <td>{{ "ok" if entry.success else "fail" }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+
 {% if status.by_type %}
-<h2>Programs by Type</h2>
+<h2>Programs by Type (All Time)</h2>
 <div class="type-stats">
     {% for ptype, count in status.by_type.items() %}
     <div class="type-stat">

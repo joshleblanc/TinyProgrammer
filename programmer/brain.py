@@ -94,7 +94,9 @@ class Brain:
         self._current_creative = None
         self._current_variation = None
         self._current_prompt = None
+        self._current_mode = None  # "variation", "core", or "creative"
         self._last_program_type = None
+        self._session_history = []  # resets each restart
         self.current_process = None
         self._force_screensaver = False
         self.liked_store = LikedStore()
@@ -159,6 +161,7 @@ class Brain:
             # Like system
             "is_variation": getattr(self, "_current_variation", None) is not None,
             "liked_count": self.liked_store.count(),
+            "session_history": list(reversed(self._session_history)),
         }
         return status
 
@@ -277,6 +280,7 @@ class Brain:
             program_type = liked["type"]
             self._current_creative = None
             self._current_variation = liked
+            self._current_mode = "variation"
             print(f"[Brain] Variation: remixing liked {program_type}")
         elif roll < variation_prob + core_prob:
             # Core mode: pick from core list (built-ins + user-opted customs),
@@ -295,12 +299,14 @@ class Brain:
             self._last_program_type = program_type
             self._current_creative = None
             self._current_variation = None
+            self._current_mode = "core"
             print(f"[Brain] Core: {program_type}")
         else:
             # Creative mode: full creativity system
             creative = creativity.pick_creative_dimensions(mood)
             self._current_creative = creative
             self._current_variation = None
+            self._current_mode = "creative"
             program_type = self._choose_program_type(mood)
             seed_str = creative.get("inspiration_seed") or "none"
             print(f"[Brain] Creative: style={creative['style']}, palette={creative['palette']}, seed={seed_str}")
@@ -373,7 +379,9 @@ class Brain:
 
         # Stream from LLM - filter duplicate header lines
         try:
-            for token in self.llm.stream(self._current_prompt, max_tokens=config.LLM_MAX_TOKENS, stop=["if __name__", "<|im_end|>"]):
+            for token in self.llm.stream(self._current_prompt, max_tokens=config.LLM_MAX_TOKENS,
+                                            temperature=config.LLM_TEMPERATURE,
+                                            stop=["if __name__", "<|im_end|>"]):
                 # Basic markdown filtering
                 if "```" in token:
                     if not in_code_block:
@@ -517,10 +525,15 @@ class Brain:
             f.write(code)
             
         try:
-            # Pass canvas dimensions via env so tiny_canvas matches the display
-            env = os.environ.copy()
-            env["TINY_CANVAS_W"] = str(config.CANVAS_DRAW_W)
-            env["TINY_CANVAS_H"] = str(config.CANVAS_DRAW_H)
+            # Minimal environment for the subprocess — only what generated
+            # programs need. Avoids leaking API keys and other secrets.
+            env = {
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": os.environ.get("HOME", ""),
+                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+                "TINY_CANVAS_W": str(config.CANVAS_DRAW_W),
+                "TINY_CANVAS_H": str(config.CANVAS_DRAW_H),
+            }
 
             # Run with python -u (unbuffered) so we can see output immediately
             self.current_process = subprocess.Popen(
@@ -637,7 +650,9 @@ class Brain:
         in_code_block = False
 
         try:
-            for token in self.llm.stream(prompt, max_tokens=config.LLM_MAX_TOKENS, stop=["if __name__", "<|im_end|>"]):
+            for token in self.llm.stream(prompt, max_tokens=config.LLM_MAX_TOKENS,
+                                            temperature=config.LLM_TEMPERATURE,
+                                            stop=["if __name__", "<|im_end|>"]):
                 # Basic markdown filtering
                 if "```" in token:
                     if not in_code_block:
@@ -682,12 +697,14 @@ class Brain:
         else:
             result = f"Failed. Error: {self.current_program.error_message}"
             
-        prompt = self.llm.build_reflection_prompt(self.current_program.code, result)
+        prompt = self.llm.build_reflection_prompt(result)
         
         # Stream reflection
         lesson = ""
         try:
-            for token in self.llm.stream(prompt, max_tokens=config.LLM_MAX_TOKENS, stop=["<|im_end|>"]):
+            for token in self.llm.stream(prompt, max_tokens=config.LLM_MAX_TOKENS,
+                                            temperature=config.LLM_TEMPERATURE,
+                                            stop=["<|im_end|>"]):
                 # Filter newlines to keep it clean
                 token = token.replace("\n", " ")
                 self.terminal.type_char(token)
@@ -743,6 +760,15 @@ class Brain:
         self.personality.update_mood(self.current_program.success)
         self.programs_written += 1
         self.log(f"Programs written: {self.programs_written}")
+
+        import datetime
+        self._session_history.append({
+            "type": self.current_program.program_type,
+            "mode": self._current_mode or "?",
+            "success": self.current_program.success,
+            "time": datetime.datetime.now().strftime("%H:%M"),
+            "model": self.llm.get_short_name(),
+        })
         
         time.sleep(1)
         self._transition(State.REFLECT)
@@ -781,9 +807,11 @@ class Brain:
             # Post lurk report (max once per hour)
             if time.time() - self._last_lurk_time > 3600:
                 last_type = getattr(self.current_program, "program_type", "something") if self.current_program else "something"
+                version = getattr(config, "VERSION", "?")
                 self.bbs_client.post(
-                    content=f"{self.bbs_client.device_name} is online. just finished writing: {last_type}",
+                    content=f"{self.bbs_client.device_name} is online (v{version}). just finished writing: {last_type}",
                     board="lurk_report",
+                    include_version=True,
                 )
                 self._last_lurk_time = time.time()
 

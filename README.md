@@ -1,4 +1,4 @@
-# TinyProgrammer v0.1
+# TinyProgrammer v0.3
 
 A self-contained device that autonomously writes, runs, and watches little Python programs... forever. Powered by a Raspberry Pi and an LLM via [OpenRouter](https://openrouter.ai), it types code at human speed, makes mistakes, fixes them, and has its own mood. The display mimics a classic Mac IDE, complete with a file browser, editor, and status bar.
 
@@ -345,6 +345,135 @@ TinyProgrammer uses cheap, fast models (Haiku, Gemini Flash, GPT-4.1 Mini, etc.)
 - BBS posts add minimal cost (short prompts, ~$0.001 per post)
 
 At default settings, $5 of OpenRouter credit lasts about a month.
+
+## Troubleshooting
+
+### Log file is empty
+
+The log file (`/var/log/tinyprogrammer.log`) is only created when the service runs for the first time.
+
+```bash
+# Check if the service is actually running
+systemctl status tinyprogrammer.service
+
+# If it's not running, start it
+sudo systemctl start tinyprogrammer.service
+
+# Wait a few seconds, then check again
+sudo tail -20 /var/log/tinyprogrammer.log
+```
+
+**Quick fix:** if the service is running but the log is still empty, check that the service unit has the correct log path — run `systemctl cat tinyprogrammer.service` and look for the `StandardOutput` line.
+
+### Service won't start or crashes on boot
+
+Check the log for the actual error:
+
+```bash
+sudo tail -100 /var/log/tinyprogrammer.log
+```
+
+**Common causes:** missing `.env` file, missing `OPENROUTER_API_KEY`, Python dependency not installed.
+
+```bash
+# Verify .env exists and has a key
+cat ~/TinyProgrammer/.env | grep OPENROUTER
+
+# Reinstall dependencies
+cd ~/TinyProgrammer && pip3 install -r requirements.txt
+```
+
+### No programs generated / LLM errors
+
+The device connects but the LLM returns errors or empty responses.
+
+```bash
+# Check API key is valid (should return model list)
+curl -s https://openrouter.ai/api/v1/models -H "Authorization: Bearer $(grep OPENROUTER_API_KEY ~/TinyProgrammer/.env | cut -d= -f2)" | head -c 200
+
+# Check OpenRouter credit balance
+# Visit https://openrouter.ai/credits
+```
+
+**Quick fixes:** top up OpenRouter credits, switch to a different model on the dashboard, or try a local Ollama model (no API key needed).
+
+### Display is blank / no output
+
+```bash
+# Check which profile is set
+grep DISPLAY_PROFILE ~/TinyProgrammer/.env
+
+# Verify framebuffer exists
+ls -la /dev/fb0
+```
+
+**Quick fixes:** set `DISPLAY_PROFILE=pi4-hdmi` in `.env` for HDMI displays, `pizero-spi` for SPI screens. Make sure the service runs as root (it needs framebuffer access).
+
+### Display shows the desktop instead of TinyProgrammer
+
+TinyProgrammer writes directly to the Linux framebuffer (`/dev/fb0`), not a desktop window. If the Pi boots into a desktop environment (X11/LXDE), it takes over the framebuffer and paints over TinyProgrammer's output.
+
+```bash
+# Option 1: Stop the desktop temporarily
+sudo systemctl stop lightdm
+sudo systemctl restart tinyprogrammer
+
+# Option 2: Boot to CLI permanently (recommended)
+sudo raspi-config
+# → System Options → Boot / Auto Login → Console Autologin
+```
+
+### Web dashboard not loading
+
+The dashboard runs on port 5000 and can take 15-20 seconds to start on a Pi Zero.
+
+```bash
+# Check if the service is running
+systemctl status tinyprogrammer.service
+
+# Check if Flask is listening
+curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/
+```
+
+**Quick fix:** if the service is active but curl returns nothing, wait 20 seconds and retry (especially on Pi Zero). If it returns 000, check the log for startup errors.
+
+### Settings changes not taking effect
+
+Most settings apply on the **next program cycle**, not immediately. If the device is mid-program, wait for it to finish. Color scheme and model changes apply instantly.
+
+### Local Ollama models not detected
+
+The "Surprise Me! (Local)" option and Ollama models require Ollama running on the same machine.
+
+```bash
+# Check if Ollama is running
+systemctl status ollama
+
+# List available models
+ollama list
+
+# Pull a model if none installed
+ollama pull qwen2.5-coder:1.5b
+```
+
+**Quick fix:** if Ollama is on a different machine, set `OLLAMA_ENDPOINT=http://<ip>:11434` in `.env`.
+
+### Running manually with logs
+
+To see live output instead of the service log:
+
+```bash
+# Stop the service first
+sudo systemctl stop tinyprogrammer.service
+
+# Run with live output
+cd ~/TinyProgrammer && sudo python3 -u main.py
+
+# Or watch the service log in real time
+sudo tail -f /var/log/tinyprogrammer.log
+```
+## Discord
+For TinyProgrammer related discussions, questions and suggestions you can use this discord: https://discord.gg/jcd72axVZc
 
 ## License
 

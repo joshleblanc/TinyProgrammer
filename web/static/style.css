@@ -416,6 +416,50 @@ h2 {
     min-width: 120px;
 }
 
+/* Session history table */
+.session-history-scroll {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #ecf0f1;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+}
+
+.session-history {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+}
+
+.session-history th {
+    text-align: left;
+    padding: 0.5rem;
+    border-bottom: 2px solid #2c3e50;
+    font-weight: 600;
+}
+
+.session-history td {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #ecf0f1;
+}
+
+.session-history tr.failure td {
+    color: #c0392b;
+}
+
+.mode-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.mode-core { background: #d5f5e3; color: #1e8449; }
+.mode-creative { background: #ebdef0; color: #7d3c98; }
+.mode-variation { background: #fdebd0; color: #ca6f1e; }
+
 /* Buttons */
 .form-actions {
     margin-top: 1.5rem;
