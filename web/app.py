@@ -7,11 +7,18 @@ Runs in a background thread alongside the main programmer loop.
 
 import os
 import re
+import sys
 import time
 import threading
 from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
 
+# Ensure project root in path so 'config' and other modules are importable
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 from .config_manager import ConfigManager
+import config
 
 # Global reference to brain (set by main.py)
 _brain = None
