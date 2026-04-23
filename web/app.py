@@ -53,6 +53,14 @@ def create_app():
             return jsonify(_brain.get_status())
         return jsonify({"error": "Brain not initialized"})
 
+    @app.route('/api/logs')
+    def api_logs():
+        """Return recent log entries as JSON."""
+        limit = request.args.get('limit', 100, type=int)
+        if _brain:
+            return jsonify({"logs": _brain.get_logs(limit=limit)})
+        return jsonify({"logs": [], "error": "Brain not initialized"})
+
     @app.route('/api/ollama-models')
     def api_ollama_models():
         """Return detected Ollama models as JSON."""
@@ -234,6 +242,11 @@ def create_app():
                              available_models=models_for_template,
                              current_model=current_model,
                              color_schemes=color_schemes)
+
+    @app.route('/logs')
+    def logs():
+        """Logs page - view recent service logs."""
+        return render_template('logs.html')
 
     @app.route('/prompt', methods=['GET', 'POST'])
     def prompt_editor():

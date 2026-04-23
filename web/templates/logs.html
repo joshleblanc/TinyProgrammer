@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - TinyProgrammer{% endblock %}
+
+{% block content %}
+<h1>Service Logs</h1>
+
+<div class="logs-controls">
+    <label>
+        Show last
+        <select id="log-limit" onchange="loadLogs()">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+        </select>
+        entries
+    </label>
+    <button onclick="loadLogs()" class="btn-secondary">Refresh</button>
+    <button onclick="clearDisplay()" class="btn-secondary">Clear Display</button>
+    <label class="auto-refresh">
+        <input type="checkbox" id="auto-refresh" onchange="toggleAutoRefresh()">
+        Auto-refresh (5s)
+    </label>
+</div>
+
+<div class="logs-container">
+    <div id="logs-output" class="logs-output">
+        <div class="logs-loading">Loading logs...</div>
+    </div>
+</div>
+
+<style>
+.logs-controls {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logs-controls select {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.auto-refresh {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.logs-container {
+    background: #1e1e1e;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.logs-output {
+    font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", "Droid Sans Mono", monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    padding: 1rem;
+    max-height: 70vh;
+    overflow-y: auto;
+    color: #d4d4d4;
+}
+
+.logs-output::-webkit-scrollbar {
+    width: 8px;
+}
+
+.logs-output::-webkit-scrollbar-track {
+    background: #2d2d2d;
+}
+
+.logs-output::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+}
+
+.logs-loading {
+    color: #888;
+    text-align: center;
+    padding: 2rem;
+}
+
+.log-entry {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #2d2d2d;
+}
+
+.log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-timestamp {
+    color: #6a9955;
+    flex-shrink: 0;
+}
+
+.log-level {
+    flex-shrink: 0;
+    padding: 0 0.4rem;
+    border-radius: 3px;
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+.log-level.info {
+    background: #264f78;
+    color: #9cdcfe;
+}
+
+.log-level.warn {
+    background: #4d3d00;
+    color: #dcdcaa;
+}
+
+.log-level.error {
+    background: #4d2020;
+    color: #f14c4c;
+}
+
+.log-message {
+    word-break: break-word;
+}
+
+.log-empty {
+    color: #888;
+    text-align: center;
+    padding: 2rem;
+}
+</style>
+
+<script>
+let autoRefreshInterval = null;
+
+function loadLogs() {
+    const limit = document.getElementById('log-limit').value;
+    const output = document.getElementById('logs-output');
+    
+    output.innerHTML = '<div class="logs-loading">Loading logs...</div>';
+    
+    fetch('/api/logs?limit=' + limit)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                output.innerHTML = '<div class="logs-empty">Error: ' + data.error + '</div>';
+                return;
+            }
+            
+            const logs = data.logs || [];
+            
+            if (logs.length === 0) {
+                output.innerHTML = '<div class="logs-empty">No logs yet. The service is still starting up.</div>';
+                return;
+            }
+            
+            output.innerHTML = logs.map(entry => {
+                const level = entry.level || 'info';
+                return `
+                    <div class="log-entry">
+                        <span class="log-timestamp">${entry.timestamp}</span>
+                        <span class="log-level ${level}">${level}</span>
+                        <span class="log-message">${escapeHtml(entry.message)}</span>
+                    </div>
+                `;
+            }).join('');
+            
+            // Scroll to bottom (most recent)
+            output.scrollTop = output.scrollHeight;
+        })
+        .catch(error => {
+            output.innerHTML = '<div class="logs-empty">Failed to load logs: ' + escapeHtml(error.message) + '</div>';
+        });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function toggleAutoRefresh() {
+    const checkbox = document.getElementById('auto-refresh');
+    if (checkbox.checked) {
+        autoRefreshInterval = setInterval(loadLogs, 5000);
+    } else {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+    }
+}
+
+function clearDisplay() {
+    document.getElementById('logs-output').innerHTML = '<div class="logs-empty">Display cleared. Click Refresh to reload logs.</div>';
+}
+
+// Load logs on page load
+loadLogs();
+</script>
+{% endblock %}

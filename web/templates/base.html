@@ -13,6 +13,7 @@
             <a href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
             <a href="{{ url_for('settings') }}" {% if request.endpoint == 'settings' %}class="active"{% endif %}>Settings</a>
             <a href="{{ url_for('prompt_editor') }}" {% if request.endpoint == 'prompt_editor' %}class="active"{% endif %}>Prompts</a>
+            <a href="{{ url_for('logs') }}" {% if request.endpoint == 'logs' %}class="active"{% endif %}>Logs</a>
         </div>
     </nav>
 

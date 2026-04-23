@@ -25,6 +25,8 @@ from programmer.liked_store import LikedStore
 from archive.repository import Repository
 from archive.learning import LearningSystem
 import config
+from collections import deque
+import threading
 
 
 class State(Enum):
@@ -96,11 +98,30 @@ class Brain:
         self.current_process = None
         self._force_screensaver = False
         self.liked_store = LikedStore()
+        # Circular log buffer for web UI
+        self._log_buffer = deque(maxlen=500)
+        self._log_lock = threading.Lock()
 
     def request_restart(self):
         """Request a restart - skip to next program cycle."""
         self._restart_requested = True
         print("[Brain] Restart requested via web UI")
+
+    def log(self, message: str, level: str = "info"):
+        """Add a message to the log buffer."""
+        from datetime import datetime
+        entry = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "level": level,
+            "message": message
+        }
+        with self._log_lock:
+            self._log_buffer.append(entry)
+
+    def get_logs(self, limit: int = 100) -> list:
+        """Get recent log entries for web UI."""
+        with self._log_lock:
+            return list(self._log_buffer)[-limit:]
 
     def get_status(self) -> dict:
         """Get current status for web UI."""
@@ -204,6 +225,7 @@ class Brain:
     def _transition(self, new_state: State):
         """Transition to a new state with delay."""
         print(f"[Brain] {self.state.name} → {new_state.name}")
+        self.log(f"State transition: {self.state.name} → {new_state.name}")
         self._update_sidebar()
         time.sleep(config.STATE_TRANSITION_DELAY)
         self.state = new_state
@@ -530,6 +552,7 @@ class Brain:
         start_time = time.time()
         duration = random.randint(config.WATCH_DURATION_MIN, config.WATCH_DURATION_MAX)
         print(f"[Brain] Watch duration: {duration}s (range: {config.WATCH_DURATION_MIN}-{config.WATCH_DURATION_MAX})")
+        self.log(f"Watching program for {duration}s")
 
         last_output = ""
         
@@ -703,6 +726,7 @@ class Brain:
         self.terminal.set_status("ARCHIVING")
         
         try:
+            self.log(f"Archiving program: {self.current_program.program_type} (success={self.current_program.success})")
             self.archive.save(
                 code=self.current_program.code,
                 program_type=self.current_program.program_type,
@@ -714,9 +738,11 @@ class Brain:
             self.terminal.type_string(f"\n// Saved to archive.\n")
         except Exception as e:
             print(f"[Brain] Archive error: {e}")
+            self.log(f"Archive error: {e}", "error")
         
         self.personality.update_mood(self.current_program.success)
         self.programs_written += 1
+        self.log(f"Programs written: {self.programs_written}")
         
         time.sleep(1)
         self._transition(State.REFLECT)
