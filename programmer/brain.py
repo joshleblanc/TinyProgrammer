@@ -691,13 +691,12 @@ class Brain:
         self.terminal.type_string("\n// what did I learn?\n")
         time.sleep(1)
         
-        # Determine result string
-        if self.current_program.success:
-            result = "Success."
-        else:
-            result = f"Failed. Error: {self.current_program.error_message}"
-            
-        prompt = self.llm.build_reflection_prompt(result)
+        prompt = self.llm.build_reflection_prompt(
+            program_type=self.current_program.program_type,
+            code=self.current_program.code,
+            success=self.current_program.success,
+            error_message=self.current_program.error_message,
+        )
         
         # Stream reflection
         lesson = ""

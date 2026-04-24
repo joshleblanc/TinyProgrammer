@@ -556,23 +556,37 @@ class LLMGenerator:
         )
         return prompt
 
-    def build_reflection_prompt(self, result: str) -> str:
-        """Build a prompt to learn from code execution."""
-        # Get canvas dimensions from config
+    def build_reflection_prompt(self, program_type: str, code: str, success: bool, error_message: str = None) -> str:
+        """Build a prompt to learn from code execution.
+
+        Args:
+            program_type: Type of program (e.g., 'mandelbrot', 'spirograph')
+            code: The actual Python code that was executed
+            success: Whether the program ran successfully
+            error_message: Error message if it failed
+        """
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
 
+        # Truncate code if too long (reflection doesn't need the whole thing)
+        code_snippet = code[-1500:] if len(code) > 1500 else code
+
+        result = "Success. Program ran without errors." if success else f"Failed. Error: {error_message}"
+
         prompt = (
-            "Review this Python code execution:\n"
-            f"Result: {result}\n\n"
-            "What is ONE technical lesson to remember for next time?\n"
-            "Focus on syntax, libraries, or logic errors.\n"
+            f"You are a small coding agent reflecting on your work.\n\n"
+            f"Program type: {program_type}\n"
+            f"Code:\n{code_snippet}\n\n"
+            f"Execution result: {result}\n\n"
+            "What is ONE specific, actionable lesson to remember?\n"
+            "It should relate to this specific program, not generic advice.\n"
             "Examples:\n"
-            "- 'Do not use c.move() because it does not exist.'\n"
-            "- 'Always initialize variables before the loop.'\n"
-            f"- 'The canvas size is {canvas_w}x{canvas_h}.'\n"
+            f"- 'For mandelbrot sets, keep the iteration count around 50-100 for good performance.'\n"
+            f"- 'Spirograph patterns need at least 3 petals to look interesting.'\n"
+            f"- 'The canvas size is {canvas_w}x{canvas_h}, scale coordinates accordingly.'\n"
+            f"- 'This type of program is slow if you redraw every frame.'\n"
             "\n"
-            "Write ONLY the lesson (1 sentence).\n"
+            "Write ONLY the lesson (1-2 sentences max).\n"
         )
         return prompt
 
