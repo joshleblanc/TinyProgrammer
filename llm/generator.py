@@ -64,6 +64,30 @@ def detect_ollama_models(endpoint=None):
     return (False, [])
 
 
+def _ensure_show_calls(code: str) -> str:
+    """Inject c.show() before each c.sleep(...) that doesn't already have it.
+
+    Liked programs archived before the CMD:FLIP convention don't call
+    c.show(). Passed verbatim into a variation prompt, the LLM tends to
+    mimic the missing call. Normalize the example so it follows the
+    current API.
+    """
+    lines = code.split("\n")
+    result = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("c.sleep("):
+            prev_idx = i - 1
+            while prev_idx >= 0 and not lines[prev_idx].strip():
+                prev_idx -= 1
+            prev_stripped = lines[prev_idx].strip() if prev_idx >= 0 else ""
+            if prev_stripped != "c.show()":
+                indent = line[:len(line) - len(line.lstrip())]
+                result.append(f"{indent}c.show()")
+        result.append(line)
+    return "\n".join(result)
+
+
 class LLMGenerator:
     """
     Interface to LLM for code generation via OpenRouter.
@@ -444,6 +468,7 @@ class LLMGenerator:
         """Build a prompt asking the LLM to create a small variation of a liked program."""
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
+        code = _ensure_show_calls(code)
 
         prompt = (
             "Here's a Python program the user enjoyed:\n\n"
