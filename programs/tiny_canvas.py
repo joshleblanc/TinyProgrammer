@@ -53,11 +53,8 @@ class Canvas:
         print(f"CMD:FILLCIRCLE,{int(x)},{int(y)},{int(radius)},{r},{g},{b}")
 
     def show(self):
-        """Update the display (flip buffer)."""
-        # In this protocol, we assume immediate drawing, but this can be a sync point
-        # print("CMD:FLIP") 
-        # For now, commands render immediately
-        pass
+        """Mark the end of a frame so the host can render it cleanly."""
+        print("CMD:FLIP")
         
     def sleep(self, seconds):
         """Sleep for seconds."""

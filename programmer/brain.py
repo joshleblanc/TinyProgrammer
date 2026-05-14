@@ -246,7 +246,12 @@ class Brain:
 
     def _watch_running_process(self, status: str, mood: str,
                                early_finish_message: str):
-        """Display output from the current process for the WATCH duration."""
+        """Display output from the current process for the WATCH duration.
+
+        Reads stdout as a stream and ticks the terminal on `CMD:FLIP` markers
+        emitted by `tiny_canvas.show()`. Programs that never call `show()`
+        still render via a periodic fallback tick.
+        """
         self.terminal.set_status(status, mood)
 
         start_time = time.time()
@@ -255,6 +260,10 @@ class Brain:
 
         last_output = ""
         stop_reason = "timeout"
+        output_buffer = ""
+        last_tick = time.monotonic()
+        FALLBACK_TICK_SECONDS = 0.05
+        READ_CHUNK_SIZE = 4096
 
         while time.time() - start_time < duration:
             if self._restart_requested or self._force_screensaver:
@@ -274,19 +283,40 @@ class Brain:
                 break
 
             try:
-                ready, _, _ = select.select([self.current_process.stdout], [], [], 0.1)
+                ready, _, _ = select.select(
+                    [self.current_process.stdout], [], [], FALLBACK_TICK_SECONDS)
                 if ready:
-                    line = self.current_process.stdout.readline()
-                    if line:
-                        if line.startswith("CMD:"):
-                            self.terminal.process_draw_command(line)
-                        else:
-                            self.terminal.type_string(line)
-                        last_output = line
+                    # Read directly from the fd so TextIOWrapper buffering
+                    # does not hide bytes from the next select() call.
+                    chunk = os.read(
+                        self.current_process.stdout.fileno(), READ_CHUNK_SIZE)
+                    if chunk:
+                        output_buffer += chunk.decode(errors="replace")
             except Exception:
                 pass
 
-            self.terminal.tick()
+            while "\n" in output_buffer:
+                line, output_buffer = output_buffer.split("\n", 1)
+                stripped = line.strip()
+
+                if stripped == "CMD:FLIP":
+                    self.terminal.tick()
+                    last_tick = time.monotonic()
+                    continue
+
+                if stripped.startswith("CMD:"):
+                    self.terminal.process_draw_command(line + "\n")
+                else:
+                    self.terminal.type_string(line + "\n")
+                last_output = line + "\n"
+
+                if (time.monotonic() - last_tick) >= FALLBACK_TICK_SECONDS:
+                    self.terminal.tick()
+                    last_tick = time.monotonic()
+
+            if (time.monotonic() - last_tick) >= FALLBACK_TICK_SECONDS:
+                self.terminal.tick()
+                last_tick = time.monotonic()
 
         self.terminal.hide_canvas()
         exit_code = self.current_process.poll()
