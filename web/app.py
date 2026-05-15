@@ -134,6 +134,66 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    @app.route('/api/record-gif', methods=['POST'])
+    def api_record_gif():
+        """Capture a 5-second animated GIF of the live display surface."""
+        if not _brain or not hasattr(_brain, 'terminal'):
+            return jsonify({"error": "Brain not initialized"}), 503
+
+        surface = _brain.terminal.screen
+        if surface is None:
+            return jsonify({"error": "No display surface available"}), 503
+
+        try:
+            import io
+            import pygame
+            import numpy as np
+            from PIL import Image
+            from datetime import datetime
+
+            DURATION_SECONDS = 5.0
+            TARGET_FPS = 10
+            INTERVAL = 1.0 / TARGET_FPS
+
+            frames = []
+            next_capture = time.monotonic()
+            end_time = next_capture + DURATION_SECONDS
+
+            while time.monotonic() < end_time:
+                now = time.monotonic()
+                if now >= next_capture:
+                    arr = pygame.surfarray.array3d(surface).transpose(1, 0, 2)
+                    img = Image.fromarray(arr.astype("uint8"), "RGB").convert(
+                        "P", palette=Image.ADAPTIVE, colors=256
+                    )
+                    frames.append(img)
+                    next_capture += INTERVAL
+                else:
+                    time.sleep(min(0.01, next_capture - now))
+
+            if not frames:
+                return jsonify({"error": "No frames captured"}), 500
+
+            buf = io.BytesIO()
+            frames[0].save(
+                buf, format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=int(INTERVAL * 1000),
+                loop=0,
+                optimize=True,
+            )
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"tinyprogrammer_{timestamp}.gif"
+            return Response(
+                buf.getvalue(),
+                mimetype="image/gif",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route('/stream')
     def video_stream():
         """MJPEG stream of the live display surface (Docker/desktop only)."""

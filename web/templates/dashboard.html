@@ -170,6 +170,7 @@
     <button onclick="screensaverOn()" class="btn-secondary">Start Screensaver</button>
     {% endif %}
     <a href="/api/screenshot" class="btn-secondary">Screenshot</a>
+    <button id="record-gif-btn" onclick="recordGif()" class="btn-secondary">Record 5s GIF</button>
     <a href="{{ url_for('dashboard') }}" class="btn-secondary">Refresh</a>
 </div>
 
@@ -210,6 +211,37 @@ function screensaverOff() {
         .then(response => response.json())
         .then(data => { if (data.success) setTimeout(() => location.reload(), 2000); })
         .catch(err => alert('Error: ' + err));
+}
+function recordGif() {
+    var btn = document.getElementById('record-gif-btn');
+    var original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Recording 5s...';
+    fetch('/api/record-gif', { method: 'POST' })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(data => { throw new Error(data.error || 'Recording failed'); });
+            }
+            var disposition = response.headers.get('Content-Disposition') || '';
+            var match = disposition.match(/filename=([^;]+)/);
+            var filename = match ? match[1].trim() : 'tinyprogrammer.gif';
+            return response.blob().then(blob => ({ blob: blob, filename: filename }));
+        })
+        .then(function (result) {
+            var url = URL.createObjectURL(result.blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = result.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        })
+        .catch(err => alert('Error: ' + err.message))
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = original;
+        });
 }
 function rerollName() {
     var btn = document.getElementById('reroll-btn');
