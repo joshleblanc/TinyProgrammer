@@ -7,7 +7,7 @@ from display.layout import scale_floor as _scale_floor
 from display.layout import scale_round_half_up as _scale_round_half_up
 
 # Tiny Programmer Configuration
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 # =============================================================================
 # DISPLAY — auto-scaled from 480x320 reference layout
