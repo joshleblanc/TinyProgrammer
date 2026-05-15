@@ -263,8 +263,18 @@ class Brain:
         stop_reason = "timeout"
         output_buffer = ""
         last_tick = time.monotonic()
+        last_flip = 0.0
         FALLBACK_TICK_SECONDS = 0.05
+        # Suppress fallback ticks while the program is actively emitting FLIP.
+        # If no FLIP for FLIP_GRACE_SECONDS, assume program isn't using show()
+        # and fall back to periodic ticks so the screen stays alive.
+        FLIP_GRACE_SECONDS = 1.0
         READ_CHUNK_SIZE = 4096
+
+        def fallback_due(now: float) -> bool:
+            if (now - last_tick) < FALLBACK_TICK_SECONDS:
+                return False
+            return (now - last_flip) >= FLIP_GRACE_SECONDS
 
         while time.time() - start_time < duration:
             if self._restart_requested or self._force_screensaver:
@@ -301,8 +311,10 @@ class Brain:
                 stripped = line.strip()
 
                 if stripped == "CMD:FLIP":
+                    now = time.monotonic()
                     self.terminal.tick()
-                    last_tick = time.monotonic()
+                    last_tick = now
+                    last_flip = now
                     continue
 
                 if stripped.startswith("CMD:"):
@@ -311,13 +323,15 @@ class Brain:
                     self.terminal.type_string(line + "\n")
                 last_output = line + "\n"
 
-                if (time.monotonic() - last_tick) >= FALLBACK_TICK_SECONDS:
+                now = time.monotonic()
+                if fallback_due(now):
                     self.terminal.tick()
-                    last_tick = time.monotonic()
+                    last_tick = now
 
-            if (time.monotonic() - last_tick) >= FALLBACK_TICK_SECONDS:
+            now = time.monotonic()
+            if fallback_due(now):
                 self.terminal.tick()
-                last_tick = time.monotonic()
+                last_tick = now
 
         self.terminal.hide_canvas()
         exit_code = self.current_process.poll()

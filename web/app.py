@@ -156,6 +156,7 @@ def create_app():
             INTERVAL = 1.0 / TARGET_FPS
 
             frames = []
+            timestamps = []
             next_capture = time.monotonic()
             end_time = next_capture + DURATION_SECONDS
 
@@ -167,6 +168,7 @@ def create_app():
                         "P", palette=Image.ADAPTIVE, colors=256
                     )
                     frames.append(img)
+                    timestamps.append(now)
                     next_capture += INTERVAL
                 else:
                     time.sleep(min(0.01, next_capture - now))
@@ -174,12 +176,21 @@ def create_app():
             if not frames:
                 return jsonify({"error": "No frames captured"}), 500
 
+            # Per-frame duration from real intervals so playback matches
+            # wall-clock time. Pi Zero often captures slower than TARGET_FPS,
+            # which would otherwise make the GIF play back too fast.
+            durations = []
+            for i in range(len(timestamps) - 1):
+                gap_ms = int((timestamps[i + 1] - timestamps[i]) * 1000)
+                durations.append(max(20, gap_ms))
+            durations.append(durations[-1] if durations else int(INTERVAL * 1000))
+
             buf = io.BytesIO()
             frames[0].save(
                 buf, format="GIF",
                 save_all=True,
                 append_images=frames[1:],
-                duration=int(INTERVAL * 1000),
+                duration=durations,
                 loop=0,
                 optimize=True,
             )
