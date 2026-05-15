@@ -14,6 +14,7 @@ Layout (480x320):
 """
 
 import os
+import threading
 import time
 import random
 from typing import Tuple, Optional, Callable, List
@@ -61,6 +62,7 @@ class Terminal:
         self.fb_writer = None
         self._chrome_backend = "asset"
         self._chrome = None
+        self._render_lock = threading.Lock()
         self._apply_chrome_regions(default_chrome_regions(config))
 
         self._init_display(font_name, font_size)
@@ -388,40 +390,52 @@ class Terminal:
         if self.mock_mode:
             return
 
-        # In BBS or screensaver mode, skip the IDE render
-        if self._bbs_mode or self._screensaver_mode:
-            self._flip()
-            return
+        with self._render_lock:
+            # In BBS or screensaver mode, skip the IDE render
+            if self._bbs_mode or self._screensaver_mode:
+                self._flip()
+                return
 
-        # 1. Draw background chrome
-        if self._use_chrome_backend():
-            self._chrome.draw_ide()
-        else:
-            self.screen.blit(self.bg_image, (0, 0))
-
-        # 2. Render sidebar file list
-        self._render_sidebar()
-
-        # 3. Render line numbers + code text
-        self._render_code()
-
-        # 4. Render cursor
-        self._render_cursor()
-
-        # 5. Render status bar
-        self._render_status()
-
-        # 6. Composite canvas popup on top (if visible)
-        if self.canvas_visible and self.canvas_surface:
+            # 1. Draw background chrome
             if self._use_chrome_backend():
-                self._chrome.draw_canvas_window()
-                self.screen.blit(self.canvas_surface, self.canvas_draw_rect.topleft)
-            elif self.canvas_image:
-                self.screen.blit(self.canvas_image, self.canvas_window_rect.topleft)
-                self.screen.blit(self.canvas_surface, self.canvas_draw_rect.topleft)
+                self._chrome.draw_ide()
+            else:
+                self.screen.blit(self.bg_image, (0, 0))
 
-        # 7. Single flip to framebuffer
-        self._flip()
+            # 2. Render sidebar file list
+            self._render_sidebar()
+
+            # 3. Render line numbers + code text
+            self._render_code()
+
+            # 4. Render cursor
+            self._render_cursor()
+
+            # 5. Render status bar
+            self._render_status()
+
+            # 6. Composite canvas popup on top (if visible)
+            if self.canvas_visible and self.canvas_surface:
+                if self._use_chrome_backend():
+                    self._chrome.draw_canvas_window()
+                    self.screen.blit(self.canvas_surface, self.canvas_draw_rect.topleft)
+                elif self.canvas_image:
+                    self.screen.blit(self.canvas_image, self.canvas_window_rect.topleft)
+                    self.screen.blit(self.canvas_surface, self.canvas_draw_rect.topleft)
+
+            # 7. Single flip to framebuffer
+            self._flip()
+
+    def get_screen_snapshot(self):
+        """Return a thread-safe copy of the latest fully-rendered screen.
+
+        The lock is shared with _render(), so callers always observe a
+        complete frame instead of a partial render in progress.
+        """
+        if self.screen is None:
+            return None
+        with self._render_lock:
+            return self.screen.copy()
 
     def _render_sidebar(self):
         """Render the file list in the sidebar."""

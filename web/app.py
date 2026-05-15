@@ -116,7 +116,7 @@ def create_app():
             import pygame
             from datetime import datetime
 
-            surface = _brain.terminal.screen
+            surface = _brain.terminal.get_screen_snapshot()
             if surface is None:
                 return jsonify({"error": "No display surface available"}), 503
 
@@ -140,8 +140,7 @@ def create_app():
         if not _brain or not hasattr(_brain, 'terminal'):
             return jsonify({"error": "Brain not initialized"}), 503
 
-        surface = _brain.terminal.screen
-        if surface is None:
+        if _brain.terminal.screen is None:
             return jsonify({"error": "No display surface available"}), 503
 
         try:
@@ -163,7 +162,10 @@ def create_app():
             while time.monotonic() < end_time:
                 now = time.monotonic()
                 if now >= next_capture:
-                    arr = pygame.surfarray.array3d(surface).transpose(1, 0, 2)
+                    snapshot = _brain.terminal.get_screen_snapshot()
+                    if snapshot is None:
+                        break
+                    arr = pygame.surfarray.array3d(snapshot).transpose(1, 0, 2)
                     img = Image.fromarray(arr.astype("uint8"), "RGB").convert(
                         "P", palette=Image.ADAPTIVE, colors=256
                     )
