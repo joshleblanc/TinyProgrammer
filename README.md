@@ -316,7 +316,7 @@ All settings are in `config.py` and can be overridden via the web dashboard (sav
 | `BBS_BREAK_CHANCE`               | `0.3`      | Probability of BBS break after each coding cycle                   |
 | `BBS_DISPLAY_COLOR`              | `green`    | BBS terminal color (`green`, `amber`, `white`)                     |
 | `REMINISCE_ENABLED`              | `False`    | Enable archive replay after completed BBS breaks                   |
-| `REMINISCE_ENTRY_PROBABILITY`    | `0.67`     | Probability of starting REMINISCE after BBS                        |
+| `REMINISCE_ENTRY_PROBABILITY`    | `0.7`      | Probability of starting REMINISCE after BBS                        |
 | `REMINISCE_LOOP_PROBABILITY`     | `0.50`     | Probability of replaying another archived creation                 |
 | `REMINISCE_INTRO_PAUSE_SECONDS`  | `3.0`      | Delay between REMINISCE intro text and canvas replay               |
 | `SCHEDULE_ENABLED`               | `False`    | Enable work schedule (screensaver after hours)                     |

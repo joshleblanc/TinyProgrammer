@@ -855,7 +855,7 @@ class Brain:
             print("[Brain] Reminisce skipped: no replay candidates")
             return State.THINK
 
-        chance = getattr(config, "REMINISCE_ENTRY_PROBABILITY", 0.67)
+        chance = getattr(config, "REMINISCE_ENTRY_PROBABILITY", 0.7)
         if random.random() >= chance:
             return State.THINK
 
