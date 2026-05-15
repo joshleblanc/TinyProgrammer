@@ -24,6 +24,7 @@ from llm.generator import LLMGenerator
 from programmer.personality import Personality
 from programmer import creativity
 from programmer.code_typing import CodeTypingRenderer
+from programmer.error_log import log_error
 from programmer.liked_store import LikedStore
 from programmer.reminiscence import Reminiscence
 from archive.repository import Repository
@@ -564,6 +565,7 @@ class Brain:
         for lib in banned:
             if f"import {lib}" in code or f"from {lib}" in code:
                 msg = f"Forbidden library usage: {lib}"
+                log_error(self.current_program.program_type, "review", msg)
                 self.terminal.type_string(f"// oops, I used {lib}!\n")
                 if self.fix_attempts < 2:
                     self.current_program.error_message = msg
@@ -577,6 +579,7 @@ class Brain:
             compile(code, "<string>", "exec")
         except SyntaxError as e:
             msg = f"SyntaxError: {e.msg} at line {e.lineno}"
+            log_error(self.current_program.program_type, "review", msg)
             self.terminal.type_string(f"// syntax error found!\n")
             if self.fix_attempts < 2:
                 self.current_program.error_message = msg
@@ -657,7 +660,8 @@ class Brain:
                 error_msg = (last_output + "\n" + remaining).strip()
                 if not error_msg:
                     error_msg = f"Process exited with code {exit_code}"
-                
+                log_error(self.current_program.program_type, "runtime", error_msg)
+
                 if self.fix_attempts < 2:
                     self.current_program.error_message = error_msg
                     self._transition(State.FIX)
