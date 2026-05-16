@@ -169,7 +169,7 @@ class Personality:
         Generate a thinking comment based on mood.
         
         Returns:
-            Comment string like "// hmm, this might work"
+            Comment string like "# hmm, this might work"
         """
         comments = THINKING_COMMENTS.get(self.mood, THINKING_COMMENTS[Mood.HOPEFUL])
         return random.choice(comments)
@@ -182,46 +182,46 @@ class Personality:
 # Comment templates by mood
 THINKING_COMMENTS = {
     Mood.HOPEFUL: [
-        "// this could be fun",
-        "// let's try something new",
-        "// i have a good feeling about this",
-        "// maybe this will work",
+        "# this could be fun",
+        "# let's try something new",
+        "# i have a good feeling about this",
+        "# maybe this will work",
     ],
     Mood.FOCUSED: [
-        "// okay, let's do this",
-        "// concentrate...",
-        "// step by step",
+        "# okay, let's do this",
+        "# concentrate...",
+        "# step by step",
     ],
     Mood.CURIOUS: [
-        "// what if i try...",
-        "// hmm, interesting",
-        "// i wonder what happens if...",
+        "# what if i try...",
+        "# hmm, interesting",
+        "# i wonder what happens if...",
     ],
     Mood.PROUD: [
-        "// that last one was nice",
-        "// i'm getting better at this",
-        "// another one!",
+        "# that last one was nice",
+        "# i'm getting better at this",
+        "# another one!",
     ],
     Mood.FRUSTRATED: [
-        "// okay, simpler this time",
-        "// maybe i was overcomplicating it",
-        "// let me try again",
-        "// ugh, focus",
+        "# okay, simpler this time",
+        "# maybe i was overcomplicating it",
+        "# let me try again",
+        "# ugh, focus",
     ],
     Mood.TIRED: [
-        "// one more...",
-        "// keeping it simple",
-        "// *yawn* okay",
+        "# one more...",
+        "# keeping it simple",
+        "# *yawn* okay",
     ],
     Mood.PLAYFUL: [
-        "// ooh what about...",
-        "// hehe this will be fun",
-        "// let's get silly",
+        "# ooh what about...",
+        "# hehe this will be fun",
+        "# let's get silly",
     ],
     Mood.DETERMINED: [
-        "// i can do this",
-        "// not giving up",
-        "// here we go again",
+        "# i can do this",
+        "# not giving up",
+        "# here we go again",
     ],
 }
 
