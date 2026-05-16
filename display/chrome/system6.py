@@ -73,7 +73,7 @@ STATUS_TEXT_X_PAD = 18
 TITLEBAR_HEIGHT = 17
 TITLE_STRIPE_COUNT = 6
 TITLE_STRIPE_GAP = 2
-TITLE_STRIPE_INSET = 1
+TITLE_STRIPE_INSET = 2
 TITLE_CLOSE_OFFSET = 12
 TITLE_CLOSE_GAP = 2
 TITLE_TEXT_PAD = 5
@@ -450,11 +450,17 @@ class System6Chrome:
             rect.w - self.scale * 2,
             title_h - self.scale,
         )
+        title_inner_rect = pygame.Rect(
+            title_rect.x,
+            title_rect.y,
+            title_rect.w,
+            max(1, title_rect.h - self.scale),
+        )
         pygame.draw.rect(self.surface, WHITE, title_rect)
 
         stripe_inset = self.scale_context.u(TITLE_STRIPE_INSET)
         stripe_gap = max(self.scale, self.scale_context.u(TITLE_CLOSE_GAP))
-        first_stripe_y, last_stripe_y, _ = self._title_stripe_metrics(title_rect)
+        first_stripe_y, last_stripe_y, _ = self._title_stripe_metrics(title_inner_rect)
 
         close_size = last_stripe_y - first_stripe_y + self.scale
         close = pygame.Rect(
@@ -472,47 +478,48 @@ class System6Chrome:
         title_pad = self.scale_context.u(TITLE_TEXT_PAD)
         erase = pygame.Rect(
             text_rect.x - title_pad,
-            title_rect.y,
+            title_inner_rect.y,
             text_rect.w + title_pad * 2,
-            title_rect.h,
-        ).clip(title_rect)
+            title_inner_rect.h,
+        ).clip(title_inner_rect)
         left_of_close_x = title_rect.x + stripe_inset
         left_of_close = pygame.Rect(
             left_of_close_x,
-            title_rect.y,
+            title_inner_rect.y,
             max(
                 0,
                 close.x - left_of_close_x - stripe_gap - TITLE_STRIPE_ENDPOINT_ADJUST,
             ),
-            title_rect.h,
+            title_inner_rect.h,
         )
         left_x = close.right + stripe_gap
         left_right = max(left_x, erase.x - stripe_gap)
-        left_stripe = pygame.Rect(left_x, title_rect.y, left_right - left_x, title_rect.h)
+        left_stripe = pygame.Rect(
+            left_x,
+            title_inner_rect.y,
+            left_right - left_x,
+            title_inner_rect.h,
+        )
         right_x = min(title_rect.right - stripe_inset, erase.right + stripe_gap)
         right_stripe = pygame.Rect(
             right_x,
-            title_rect.y,
+            title_inner_rect.y,
             max(0, title_rect.right - stripe_inset - right_x),
-            title_rect.h,
+            title_inner_rect.h,
         )
         self._draw_title_stripes(left_of_close)
         self._draw_title_stripes(left_stripe)
         self._draw_title_stripes(right_stripe)
         pygame.draw.rect(self.surface, WHITE, erase)
-        self.surface.blit(text, text_rect)
+        previous_clip = self.surface.get_clip()
+        try:
+            self.surface.set_clip(title_inner_rect)
+            self.surface.blit(text, text_rect)
+        finally:
+            self.surface.set_clip(previous_clip)
         title_bottom_y = title_rect.bottom
         title_bottom_right = rect.right - self.scale
-        if erase.x > rect.x:
-            self._painter.line(
-                (rect.x, title_bottom_y),
-                (erase.x - self.scale, title_bottom_y),
-            )
-        if erase.right < title_bottom_right:
-            self._painter.line(
-                (erase.right, title_bottom_y),
-                (title_bottom_right, title_bottom_y),
-            )
+        self._painter.line((rect.x, title_bottom_y), (title_bottom_right, title_bottom_y))
 
     def _window_titlebar_height(self) -> int:
         return self.scale_context.u(TITLEBAR_HEIGHT)
@@ -531,7 +538,7 @@ class System6Chrome:
         for _ in range(TITLE_STRIPE_COUNT):
             if y < rect.y or y >= rect.bottom:
                 break
-            self._painter.line((rect.x, y), (rect.right, y))
+            self._painter.line((rect.x, y), (rect.right - 1, y))
             y += gap
 
     def _title_stripe_metrics(self, rect: pygame.Rect) -> tuple[int, int, int]:
