@@ -606,39 +606,54 @@ class Terminal:
         if self.canvas_surface is None:
             return
 
-        target = self.canvas_surface
-
         try:
             parts = cmd_str.strip().split(':')[1].split(',')
             c = parts[0]
             args = [int(x) for x in parts[1:]]
-            if c == "CLEAR":
-                target.fill(tuple(args[:3]))
-            elif c == "PIXEL":
-                target.set_at((args[0], args[1]), tuple(args[2:]))
-            elif c == "LINE":
-                pygame.draw.line(
-                    target, tuple(args[4:]),
-                    (args[0], args[1]), (args[2], args[3]))
-            elif c == "RECT":
-                pygame.draw.rect(
-                    target, tuple(args[4:]),
-                    (args[0], args[1], args[2], args[3]), 1)
-            elif c == "FILLRECT":
-                pygame.draw.rect(
-                    target, tuple(args[4:]),
-                    (args[0], args[1], args[2], args[3]))
-            elif c == "CIRCLE":
-                pygame.draw.circle(
-                    target, tuple(args[3:]),
-                    (args[0], args[1]), args[2], 1)
-            elif c == "FILLCIRCLE":
-                pygame.draw.circle(
-                    target, tuple(args[3:]),
-                    (args[0], args[1]), args[2])
-            self._dirty = True  # Will be composited on next _render()
+            self._process_canvas_command(c, args)
         except Exception:
             pass  # Silently ignore malformed commands
+
+    def process_draw_commands(self, commands):
+        """Process a batch of structured canvas drawing commands."""
+        if self.mock_mode or self.canvas_surface is None:
+            return
+
+        for command in commands:
+            try:
+                c = command[0]
+                args = [int(x) for x in command[1:]]
+                self._process_canvas_command(c, args)
+            except Exception:
+                pass
+
+    def _process_canvas_command(self, c: str, args: list[int]):
+        target = self.canvas_surface
+        if c == "CLEAR":
+            target.fill(tuple(args[:3]))
+        elif c == "PIXEL":
+            target.set_at((args[0], args[1]), tuple(args[2:]))
+        elif c == "LINE":
+            pygame.draw.line(
+                target, tuple(args[4:]),
+                (args[0], args[1]), (args[2], args[3]))
+        elif c == "RECT":
+            pygame.draw.rect(
+                target, tuple(args[4:]),
+                (args[0], args[1], args[2], args[3]), 1)
+        elif c == "FILLRECT":
+            pygame.draw.rect(
+                target, tuple(args[4:]),
+                (args[0], args[1], args[2], args[3]))
+        elif c == "CIRCLE":
+            pygame.draw.circle(
+                target, tuple(args[3:]),
+                (args[0], args[1]), args[2], 1)
+        elif c == "FILLCIRCLE":
+            pygame.draw.circle(
+                target, tuple(args[3:]),
+                (args[0], args[1]), args[2])
+        self._dirty = True  # Will be composited on next _render()
 
     # =========================================================================
     # Event handling and tick

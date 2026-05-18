@@ -317,6 +317,15 @@ class Brain:
                     last_flip = now
                     continue
 
+                if stripped.startswith("CMDS:"):
+                    try:
+                        commands = json.loads(stripped[5:])
+                        self.terminal.process_draw_commands(commands)
+                    except Exception:
+                        pass
+                    last_output = line + "\n"
+                    continue
+
                 if stripped.startswith("CMD:"):
                     self.terminal.process_draw_command(line + "\n")
                 else:
