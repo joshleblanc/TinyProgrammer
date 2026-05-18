@@ -1,7 +1,19 @@
+import atexit
 import os
 import json
 import sys
 import time
+
+
+DEFAULT_BATCH_MAX = 512
+
+
+def _read_batch_max() -> int:
+    try:
+        value = int(os.environ.get("TINY_CANVAS_BATCH_MAX", DEFAULT_BATCH_MAX))
+    except (TypeError, ValueError):
+        return DEFAULT_BATCH_MAX
+    return value if value > 0 else DEFAULT_BATCH_MAX
 
 class Canvas:
     """
@@ -15,9 +27,12 @@ class Canvas:
         self.width = w if w is not None else int(os.environ.get("TINY_CANVAS_W", 416))
         self.height = h if h is not None else int(os.environ.get("TINY_CANVAS_H", 218))
         self._batch_enabled = os.environ.get("TINY_CANVAS_BATCH", "1").lower() not in ("0", "false", "no")
+        self._batch_max = _read_batch_max()
         self._commands = []
+        self._frame_dirty = False
         # Flush immediately so animation is smooth
         sys.stdout.reconfigure(line_buffering=True)
+        atexit.register(self._flush_at_exit)
 
     def update(self):
         """Flush and render the current frame."""
@@ -30,6 +45,8 @@ class Canvas:
     def _emit(self, command, *args):
         if self._batch_enabled:
             self._commands.append([command, *args])
+            if len(self._commands) >= self._batch_max:
+                self._flush()
             return
         print("CMD:" + ",".join(str(part) for part in (command, *args)))
 
@@ -38,6 +55,15 @@ class Canvas:
             return
         print("CMDS:" + json.dumps(self._commands, separators=(",", ":")))
         self._commands = []
+        self._frame_dirty = True
+
+    def _flush_at_exit(self):
+        if not self._batch_enabled:
+            return
+        self._flush()
+        if self._frame_dirty:
+            print("CMD:FLIP")
+            self._frame_dirty = False
 
     def clear(self, r=0, g=0, b=0):
         """Clear screen with color."""
@@ -71,6 +97,7 @@ class Canvas:
         """Mark the end of a frame so the host can render it cleanly."""
         self._flush()
         print("CMD:FLIP")
+        self._frame_dirty = False
 
     def sleep(self, seconds):
         """Sleep for seconds."""

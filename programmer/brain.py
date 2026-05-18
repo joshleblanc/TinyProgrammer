@@ -320,7 +320,8 @@ class Brain:
                 if stripped.startswith("CMDS:"):
                     try:
                         commands = json.loads(stripped[5:])
-                        self.terminal.process_draw_commands(commands)
+                        if isinstance(commands, list):
+                            self.terminal.process_draw_commands(commands)
                     except Exception:
                         pass
                     last_output = line + "\n"
