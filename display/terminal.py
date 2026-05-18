@@ -672,6 +672,7 @@ class Terminal:
         if PYGAME_AVAILABLE and not self.mock_mode:
             if self.fb_writer:
                 self.fb_writer.clear(0, 0, 0)
+                self.fb_writer.close()
             pygame.quit()
 
     def check_ghosting_refresh(self):
