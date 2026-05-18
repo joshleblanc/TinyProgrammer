@@ -281,7 +281,7 @@ class Brain:
                 if self._restart_requested:
                     self._restart_requested = False
                     stop_reason = "restart"
-                    self.terminal.type_string("\n// Restart requested!\n")
+                    self.terminal.type_string("\n# Restart requested!\n")
                 else:
                     stop_reason = "screensaver"
                 if self.current_process.poll() is None:
@@ -537,7 +537,7 @@ class Brain:
         except Exception as e:
             print(f"[Brain] LLM Error: {e}")
             code_typing.finish()
-            self.terminal.type_string(f"\n// Error: {e}\n")
+            self.terminal.type_string(f"\n# Error: {e}\n")
             self.current_program.success = False
             self.current_program.error_message = str(e)
             self._transition(State.ERROR)
@@ -551,7 +551,7 @@ class Brain:
         code_typing.finish()
 
         self.current_program.code = full_code
-        self.terminal.type_string("\n\n// finished.\n")
+        self.terminal.type_string("\n\n# finished.\n")
         time.sleep(0.5)
         self._transition(State.REVIEW)
     
@@ -560,7 +560,7 @@ class Brain:
         Review state: check code for obvious errors.
         """
         self.terminal.set_status("REVIEWING", "careful")
-        self.terminal.type_string("\n// checking my work...\n")
+        self.terminal.type_string("\n# checking my work...\n")
         time.sleep(1)
         
         # Clean the code (same as in _do_run)
@@ -580,13 +580,13 @@ class Brain:
             if f"import {lib}" in code or f"from {lib}" in code:
                 msg = f"Forbidden library usage: {lib}"
                 log_error(self.current_program.program_type, "review", msg)
-                self.terminal.type_string(f"// oops, I used {lib}!\n")
+                self.terminal.type_string(f"# oops, I used {lib}!\n")
                 if self.fix_attempts < 2:
                     self.current_program.error_message = msg
                     self._transition(State.FIX)
                     return
                 else:
-                    self.terminal.type_string("// ignoring it...\n")
+                    self.terminal.type_string("# ignoring it...\n")
 
         # 2. Check syntax
         try:
@@ -594,18 +594,18 @@ class Brain:
         except SyntaxError as e:
             msg = f"SyntaxError: {e.msg} at line {e.lineno}"
             log_error(self.current_program.program_type, "review", msg)
-            self.terminal.type_string(f"// syntax error found!\n")
+            self.terminal.type_string(f"# syntax error found!\n")
             if self.fix_attempts < 2:
                 self.current_program.error_message = msg
                 self._transition(State.FIX)
                 return
             else:
-                self.terminal.type_string("// still broken, giving up.\n")
+                self.terminal.type_string("# still broken, giving up.\n")
                 self.current_program.success = False
                 self._transition(State.ARCHIVE)
                 return
             
-        self.terminal.type_string("// looks good!\n")
+        self.terminal.type_string("# looks good!\n")
         time.sleep(0.5)
         self._transition(State.RUN)
     
@@ -661,7 +661,7 @@ class Brain:
         exit_code, last_output, _ = self._watch_running_process(
             "WATCHING",
             self.personality.get_mood_status(),
-            "\n// Program finished early.\n",
+            "\n# Program finished early.\n",
         )
         if exit_code is None:
             self.current_program.success = True
@@ -691,9 +691,9 @@ class Brain:
         """Fix state: try to repair broken code."""
         self.fix_attempts += 1
         self.terminal.set_status("FIXING", "worried")
-        self.terminal.type_string(f"\n// oh no, it broke :(\n")
+        self.terminal.type_string(f"\n# oh no, it broke :(\n")
         time.sleep(1)
-        self.terminal.type_string(f"// trying to fix it (attempt {self.fix_attempts})...\n")
+        self.terminal.type_string(f"# trying to fix it (attempt {self.fix_attempts})...\n")
         time.sleep(1)
         
         prompt = self.llm.build_fix_prompt(self.current_program.code, self.current_program.error_message)
@@ -737,14 +737,14 @@ class Brain:
 
         code_typing.finish()
         self.current_program.code = full_code
-        self.terminal.type_string("\n\n// fixed?\n")
+        self.terminal.type_string("\n\n# fixed?\n")
         time.sleep(1)
         self._transition(State.REVIEW)
     
     def _do_reflect(self):
         """Reflect on what happened and learn a lesson."""
         self.terminal.set_status("REFLECTING", "wise")
-        self.terminal.type_string("\n// what did I learn?\n")
+        self.terminal.type_string("\n# what did I learn?\n")
         time.sleep(1)
         
         # Determine result string
@@ -773,7 +773,7 @@ class Brain:
             
         if lesson:
             self.learning.add_lesson(lesson)
-            self.terminal.type_string("\n// saved to memory.\n")
+            self.terminal.type_string("\n# saved to memory.\n")
         
         time.sleep(2)
 
@@ -808,7 +808,7 @@ class Brain:
                 thought_process=self.current_program.thought_process,
                 error_message=self.current_program.error_message
             )
-            self.terminal.type_string(f"\n// Saved to archive.\n")
+            self.terminal.type_string(f"\n# Saved to archive.\n")
         except Exception as e:
             print(f"[Brain] Archive error: {e}")
         
@@ -834,7 +834,7 @@ class Brain:
         Handle errors gracefully, try to recover.
         """
         self.terminal.set_status("ERROR", "confused")
-        self.terminal.type_string("// something went wrong...\n")
+        self.terminal.type_string("# something went wrong...\n")
         time.sleep(2)
         self.personality.update_mood(False)
         self._transition(State.THINK)
@@ -914,14 +914,14 @@ class Brain:
         except Exception as e:
             self.terminal.hide_canvas()
             print(f"[Brain] Reminisce start failed for {metadata.filename}: {e}")
-            self.terminal.type_string(f"\n// the reminisce replay would not open: {e}\n")
+            self.terminal.type_string(f"\n# the reminisce replay would not open: {e}\n")
             self._after_reminisce()
             return
 
         exit_code, last_output, stop_reason = self._watch_running_process(
             "REMINISCING",
             metadata.mood or self.personality.get_mood_status(),
-            "\n// Reminisce replay finished early.\n",
+            "\n# Reminisce replay finished early.\n",
         )
         if stop_reason == "restart":
             self.reminiscence.clear()
