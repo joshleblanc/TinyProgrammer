@@ -24,7 +24,6 @@ AVAILABLE_MODELS = {
     "anthropic/claude-3.5-haiku": ("Claude 3.5 Haiku", "Haiku 3.5"),
     "google/gemini-3-flash-preview": ("Gemini 3 Flash", "Flash"),
     "openai/gpt-4.1-mini": ("GPT-4.1 Mini", "GPT-4.1"),
-    "x-ai/grok-code-fast-1": ("Grok Code Fast", "Grok"),
     "deepseek/deepseek-v3.2": ("DeepSeek V3.2", "DeepSeek"),
     # Local models (Ollama) - require Ollama running locally
     # EXPERIMENTAL: Local models may be slow and produce lower quality code on Pi4
