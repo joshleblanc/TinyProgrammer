@@ -43,6 +43,31 @@ SURPRISE_ME_LOCAL = "surprise_me_local"
 # Default model
 DEFAULT_MODEL = "surprise_me"
 
+SHORT_PYTHON_OUTPUT_RULES = (
+    "OUTPUT RAW PYTHON ONLY.\n"
+    "No markdown fences, no language tag, no prose before or after code.\n"
+    "Python # comments are OK.\n"
+)
+
+LONG_PYTHON_OUTPUT_RULES = (
+    "FINAL OUTPUT RULES:\n"
+    "- Return raw Python source only.\n"
+    "- Start with the first line of Python code.\n"
+    "- Do not narrate outside the code.\n"
+    "- Do not write prose before or after the code.\n"
+    "- You may include short Python comments using #.\n"
+    "- Do not use markdown fences.\n"
+    "- Do not write python as a language tag.\n"
+    "- Do not add any non-Python text.\n"
+)
+
+
+def _python_output_rules(model_name: str) -> str:
+    """Return concise output rules for local models, detailed ones otherwise."""
+    if model_name.startswith("ollama/"):
+        return SHORT_PYTHON_OUTPUT_RULES
+    return LONG_PYTHON_OUTPUT_RULES
+
 
 def detect_ollama_models(endpoint=None):
     """
@@ -400,7 +425,7 @@ class LLMGenerator:
             "  c.show()\n"
             "  c.sleep(seconds)\n"
             "Do NOT use any other methods.\n\n"
-            "Output ONLY Python code. No markdown, no explanation.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
 
         return prompt
@@ -428,7 +453,7 @@ class LLMGenerator:
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n\n"
             "Methods on 'c': clear, pixel, line, rect, fill_rect, circle, fill_circle, show, sleep\n"
             "All draw methods take r,g,b after coordinates. c.show() takes no args.\n\n"
-            "Output ONLY Python code.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
@@ -460,7 +485,7 @@ class LLMGenerator:
             "  def surface(x, y):\n"
             "      return math.sin(math.sqrt(x*x + y*y))\n"
             "  p.run(surface)\n\n"
-            "Output ONLY Python code. No markdown, no explanation.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
@@ -498,7 +523,7 @@ class LLMGenerator:
             "  c.show()\n"
             "  c.sleep(seconds)\n"
             "Do NOT use any other methods.\n\n"
-            "Output ONLY Python code. No markdown, no explanation.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
@@ -529,10 +554,10 @@ class LLMGenerator:
             f"{code}\n\n"
             f"Error: {error}\n\n"
             "FIX IT. Write ONLY the fixed code.\n"
-            "NO explanations. NO markdown.\n"
             "Constraints:\n"
             "- Keep it simple.\n"
-            "- Use 'c' for drawing.\n"
+            "- Use 'c' for drawing.\n\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
