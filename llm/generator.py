@@ -25,7 +25,7 @@ AVAILABLE_MODELS = {
     "google/gemini-3-flash-preview": ("Gemini 3 Flash", "Flash"),
     "openai/gpt-4.1-mini": ("GPT-4.1 Mini", "GPT-4.1"),
     "deepseek/deepseek-v3.2": ("DeepSeek V3.2", "DeepSeek"),
-    "qwen/qwen3-coder-next": ("Qwen3 Coder Next", "QwenCoder"),
+    "qwen/qwen3-coder-next": ("Qwen3 Coder Next", "Qwen"),
     # Local models (Ollama) - require Ollama running locally
     # EXPERIMENTAL: Local models may be slow and produce lower quality code on Pi4
     # Install: curl -fsSL https://ollama.com/install.sh | sh
