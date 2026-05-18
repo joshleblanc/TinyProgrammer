@@ -33,6 +33,7 @@ def create_app():
 
     # Initialize config manager
     config_mgr = ConfigManager()
+    app.config["VERSION"] = config_mgr.get("VERSION", "?")
 
     # =========================================================================
     # Routes
