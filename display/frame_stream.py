@@ -28,10 +28,10 @@ def _stream_settings() -> tuple[float, float, int]:
         import config
 
         fps = float(getattr(config, "WEB_STREAM_FPS", 4))
-        scale = float(getattr(config, "WEB_STREAM_SCALE", 0.5))
-        quality = int(getattr(config, "WEB_STREAM_JPEG_QUALITY", 60))
+        scale = float(getattr(config, "WEB_STREAM_SCALE", 0.75))
+        quality = int(getattr(config, "WEB_STREAM_JPEG_QUALITY", 70))
     except Exception:
-        fps, scale, quality = 4.0, 0.5, 60
+        fps, scale, quality = 4.0, 0.75, 70
 
     fps = max(0.1, min(30.0, fps))
     scale = max(0.1, min(1.0, scale))

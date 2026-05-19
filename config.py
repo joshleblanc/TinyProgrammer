@@ -328,8 +328,8 @@ WEB_HOST = "0.0.0.0"   # Listen on all interfaces
 WEB_PORT = 5000
 WEB_STREAM_ENABLED = os.environ.get("WEB_STREAM_ENABLED", "false").lower() in ("1", "true", "yes")
 WEB_STREAM_FPS = float(os.environ.get("WEB_STREAM_FPS", "4"))
-WEB_STREAM_SCALE = float(os.environ.get("WEB_STREAM_SCALE", "0.5"))
-WEB_STREAM_JPEG_QUALITY = int(os.environ.get("WEB_STREAM_JPEG_QUALITY", "60"))
+WEB_STREAM_SCALE = float(os.environ.get("WEB_STREAM_SCALE", "0.75"))
+WEB_STREAM_JPEG_QUALITY = int(os.environ.get("WEB_STREAM_JPEG_QUALITY", "70"))
 
 # =============================================================================
 # DISPLAY COLOR SCHEME
