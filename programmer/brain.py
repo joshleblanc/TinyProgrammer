@@ -806,6 +806,7 @@ class Brain:
                 mood=self.personality.get_mood_status(),
                 success=self.current_program.success,
                 thought_process=self.current_program.thought_process,
+                model=self.llm.get_actual_model(),
                 error_message=self.current_program.error_message
             )
             self.terminal.type_string(f"\n# Saved to archive.\n")
