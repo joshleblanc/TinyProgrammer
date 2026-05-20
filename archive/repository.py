@@ -15,6 +15,19 @@ from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, asdict
 
 
+CANVAS_PROTOCOL_LEGACY = "legacy"
+CANVAS_PROTOCOL_BATCHED = "batched"
+CANVAS_PROTOCOLS = {CANVAS_PROTOCOL_LEGACY, CANVAS_PROTOCOL_BATCHED}
+
+
+def normalize_canvas_protocol(value: str) -> str:
+    """Return a known canvas protocol, defaulting old metadata to legacy."""
+    protocol = str(value or CANVAS_PROTOCOL_LEGACY).strip().lower()
+    if protocol not in CANVAS_PROTOCOLS:
+        return CANVAS_PROTOCOL_LEGACY
+    return protocol
+
+
 @dataclass
 class ProgramMetadata:
     """Metadata for an archived program."""
@@ -29,6 +42,10 @@ class ProgramMetadata:
     error_message: Optional[str] = None
     screenshot_path: Optional[str] = None
     synced_to_github: bool = False
+    canvas_protocol: str = CANVAS_PROTOCOL_LEGACY
+
+    def __post_init__(self):
+        self.canvas_protocol = normalize_canvas_protocol(self.canvas_protocol)
 
 
 class Repository:
@@ -92,7 +109,8 @@ class Repository:
     
     def save(self, code: str, program_type: str, mood: str,
              success: bool, thought_process: str = "",
-             error_message: Optional[str] = None) -> Optional[ProgramMetadata]:
+             error_message: Optional[str] = None,
+             canvas_protocol: str = CANVAS_PROTOCOL_LEGACY) -> Optional[ProgramMetadata]:
         """
         Save a program to the archive.
         
@@ -103,6 +121,7 @@ class Repository:
             success: Whether it ran successfully
             thought_process: Thinking comments
             error_message: Error if failed
+            canvas_protocol: Canvas output protocol validated during the run
             
         Returns:
             Created metadata or None if not saved
@@ -131,7 +150,8 @@ class Repository:
             lines_of_code=len(code.strip().split('\n')),
             thought_process=thought_process,
             error_message=error_message,
-            synced_to_github=False
+            synced_to_github=False,
+            canvas_protocol=normalize_canvas_protocol(canvas_protocol),
         )
         
         # Update index
