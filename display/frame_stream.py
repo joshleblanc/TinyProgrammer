@@ -20,6 +20,7 @@ _pending_surface = None
 _pending_settings: tuple[float, int] = (1.0, 70)
 _encoder_thread: threading.Thread | None = None
 _active_clients: int = 0
+_placeholder_frame: bytes | None = None
 
 
 def _stream_settings() -> tuple[float, float, int]:
@@ -105,6 +106,26 @@ def get_frame() -> bytes:
     """Return the latest JPEG frame bytes (empty bytes if none yet)."""
     with _lock:
         return _latest_frame
+
+
+def placeholder_frame() -> bytes:
+    """Return a tiny JPEG used to keep new MJPEG responses writable."""
+    global _placeholder_frame
+
+    with _lock:
+        if _placeholder_frame is not None:
+            return _placeholder_frame
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1, 1), (0, 0, 0)).save(buf, format="JPEG", quality=20)
+    frame = buf.getvalue()
+
+    with _lock:
+        if _placeholder_frame is None:
+            _placeholder_frame = frame
+        return _placeholder_frame
 
 
 def wait_for_frame(last_sequence: int = 0, timeout: float = 1.0) -> tuple[bytes, int]:

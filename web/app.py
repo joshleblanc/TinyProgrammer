@@ -215,19 +215,24 @@ def create_app():
         if not config.WEB_STREAM_ENABLED:
             return "Stream not enabled. Set WEB_STREAM_ENABLED=true to activate.", 404
 
-        from display.frame_stream import register_client, unregister_client, wait_for_frame
+        from display.frame_stream import placeholder_frame, register_client, unregister_client, wait_for_frame
+
+        def mjpeg_part(frame):
+            return (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+            )
 
         def generate():
             sequence = 0
             register_client()
             try:
+                frame, sequence = wait_for_frame(sequence, timeout=0)
+                yield mjpeg_part(frame or placeholder_frame())
+
                 while True:
                     frame, sequence = wait_for_frame(sequence, timeout=1.0)
-                    if frame:
-                        yield (
-                            b"--frame\r\n"
-                            b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-                        )
+                    yield mjpeg_part(frame or placeholder_frame())
             finally:
                 unregister_client()
 
