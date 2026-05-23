@@ -143,6 +143,16 @@ def probe_sdl_drivers(drivers: list[str], timeout: float) -> dict[str, str]:
     return results
 
 
+def positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
 def summarize(values: list[float]) -> dict[str, float]:
     avg = statistics.mean(values)
     return {
@@ -154,7 +164,7 @@ def summarize(values: list[float]) -> dict[str, float]:
     }
 
 
-def bench(name: str, count: int, fn: Callable[[], None], warmup: int = 1) -> dict[str, Any]:
+def bench(name: str, count: int, fn: Callable[[], object], warmup: int = 1) -> dict[str, Any]:
     for _ in range(warmup):
         fn()
 
@@ -211,6 +221,20 @@ def encode_stream_frame(surface, scale: float = 1.0, quality: int = 70) -> bytes
     return buf.getvalue()
 
 
+def current_sdl_driver(pygame: Any) -> str | None:
+    if not pygame.display.get_init():
+        return None
+    try:
+        return pygame.display.get_driver()
+    except pygame.error as exc:
+        return f"unavailable: {exc}"
+
+
+def write_framebuffer_frame(writer: Any, surface: Any) -> None:
+    if not writer.write(surface):
+        raise RuntimeError(f"framebuffer write failed for {writer.device}")
+
+
 def benchmark_typing(terminal, text: str, count: int) -> dict[str, Any]:
     from programmer.code_typing import CodeTypingRenderer
 
@@ -260,14 +284,14 @@ def benchmark_canvas_commands(terminal, commands: list[str], count: int) -> dict
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--samples", type=int, default=5)
+    parser.add_argument("--samples", type=positive_int, default=5)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--lines", type=int, default=1000)
     parser.add_argument("--canvas-commands", type=int, default=1000)
     parser.add_argument("--typing-lines", type=int, default=4)
     parser.add_argument(
         "--typing-samples",
-        type=int,
+        type=positive_int,
         default=1,
         help="typing uses the real tick path, so keep this low on slow displays",
     )
@@ -309,9 +333,8 @@ def main() -> int:
         "framebuffer": discover_framebuffer(FB_DEVICE),
         "drm": discover_drm(),
         "sdl": {
-            "current_driver": pygame.display.get_driver()
-            if pygame.display.get_init()
-            else None,
+            "driver_before_terminal": current_sdl_driver(pygame),
+            "current_driver": None,
             "probe": "skipped; pass --probe-sdl to test candidate drivers",
         },
     }
@@ -320,10 +343,6 @@ def main() -> int:
             ["kmsdrm", "fbcon", "directfb", "x11", "wayland", "dummy"],
             args.sdl_timeout,
         )
-
-    print("== Capabilities ==")
-    print(json.dumps(capabilities, indent=2, sort_keys=True))
-    print("== Benchmarks ==")
 
     terminal = Terminal(
         width=config.DISPLAY_WIDTH,
@@ -335,11 +354,16 @@ def main() -> int:
         status_bar_height=config.STATUS_BAR_HEIGHT,
     )
     terminal._min_flip_interval = 0
+    capabilities["sdl"]["current_driver"] = current_sdl_driver(pygame)
 
     surface = make_surface(pygame, config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT, args.lines)
     writer = FramebufferWriter(config.DISPLAY_WIDTH, config.DISPLAY_HEIGHT)
     original_stream_enabled = getattr(config, "WEB_STREAM_ENABLED", False)
     results: list[dict[str, Any]] = []
+
+    print("== Capabilities ==")
+    print(json.dumps(capabilities, indent=2, sort_keys=True))
+    print("== Benchmarks ==")
 
     try:
         results.append(
@@ -351,16 +375,24 @@ def main() -> int:
             )
         )
 
+        framebuffer_write_available = False
         if writer.enabled:
+            try:
+                write_framebuffer_frame(writer, surface)
+                framebuffer_write_available = True
+            except RuntimeError as exc:
+                print(f"fb_write_full: skipped ({exc})")
+
+        if framebuffer_write_available:
             results.append(
                 bench(
                     "fb_write_full",
                     args.samples,
-                    lambda: writer.write(surface),
+                    lambda: write_framebuffer_frame(writer, surface),
                     args.warmup,
                 )
             )
-        else:
+        elif not writer.enabled:
             print("fb_write_full: skipped (framebuffer unavailable)")
 
         results.append(
@@ -427,20 +459,26 @@ def main() -> int:
         )
 
         config.WEB_STREAM_ENABLED = False
-        results.append(
-            bench(
-                "terminal_render_display_no_stream",
-                args.samples,
-                terminal._render,
-                args.warmup,
+        if terminal.fb_writer and not framebuffer_write_available:
+            print("terminal_render_display_no_stream: skipped (framebuffer write failed)")
+        else:
+            results.append(
+                bench(
+                    "terminal_render_display_no_stream",
+                    args.samples,
+                    terminal._render,
+                    args.warmup,
+                )
             )
-        )
 
         typing_text = "".join(
             f"for i in range({line}): print(i)  # line {line}\n"
             for line in range(args.typing_lines)
         )
-        results.append(benchmark_typing(terminal, typing_text, args.typing_samples))
+        if terminal.fb_writer and not framebuffer_write_available:
+            print("typing_render_chars: skipped (framebuffer write failed)")
+        else:
+            results.append(benchmark_typing(terminal, typing_text, args.typing_samples))
     finally:
         config.WEB_STREAM_ENABLED = original_stream_enabled
         if hasattr(writer, "close"):
