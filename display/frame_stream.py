@@ -34,7 +34,7 @@ def _stream_settings() -> tuple[float, float, int]:
     except Exception:
         fps, scale, quality = 1.0, 1.0, 85
 
-    fps = max(0.1, min(30.0, fps))
+    fps = max(1.0, min(30.0, fps))
     scale = max(0.1, min(1.0, scale))
     quality = max(20, min(95, quality))
     return fps, scale, quality
