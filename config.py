@@ -200,8 +200,8 @@ LLM_STOP_TOKENS = ["```", "# END", "if __name__"]
 # =============================================================================
 
 # Typing speed (characters per second) - will vary by mood
-TYPING_SPEED_MIN = 2
-TYPING_SPEED_MAX = 8
+TYPING_SPEED_MIN = 15
+TYPING_SPEED_MAX = 50
 
 # Opt-in jump over leading indentation while generated code is typed.
 TYPING_SKIP_INDENT = False
