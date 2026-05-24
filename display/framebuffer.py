@@ -68,20 +68,21 @@ def rgb888_to_rgb565(surface) -> np.ndarray:
     # pixels3d is a view, avoiding the full RGB888 copy made by array3d().
     arr = pygame.surfarray.pixels3d(surface)  # Shape: (width, height, 3)
 
-    # Extract RGB channels
-    r = arr[:, :, 0].astype(np.uint16)
-    g = arr[:, :, 1].astype(np.uint16)
-    b = arr[:, :, 2].astype(np.uint16)
+    # Extract RGB channels as uint8 (views; LUT path consumes uint8 directly).
+    r = arr[:, :, 0]
+    g = arr[:, :, 1]
+    b = arr[:, :, 2]
 
-    # Apply color adjustment layer if active
+    # Apply color adjustment layer if active. Returns uint8 arrays.
     if _color_scheme != "none":
         r, g, b = apply_color_adjustment(r, g, b, _color_scheme)
 
-    # Convert to RGB565
-    # R: 8 bits -> 5 bits (shift right 3, then left 11)
-    # G: 8 bits -> 6 bits (shift right 2, then left 5)
-    # B: 8 bits -> 5 bits (shift right 3)
-    rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+    # Convert to RGB565. Widening to uint16 happens after color adjust so the
+    # heavy intermediates stay uint8.
+    r16 = r.astype(np.uint16)
+    g16 = g.astype(np.uint16)
+    b16 = b.astype(np.uint16)
+    rgb565 = ((r16 & 0xF8) << 8) | ((g16 & 0xFC) << 3) | (b16 >> 3)
 
     # Transpose because pygame uses (x, y) but framebuffer uses (y, x)
     return np.ascontiguousarray(rgb565.T)
@@ -92,16 +93,16 @@ def rgb888_to_xrgb8888(surface) -> np.ndarray:
     import pygame
     arr = pygame.surfarray.pixels3d(surface)  # Shape: (width, height, 3)
 
-    r = arr[:, :, 0].astype(np.uint32)
-    g = arr[:, :, 1].astype(np.uint32)
-    b = arr[:, :, 2].astype(np.uint32)
+    r = arr[:, :, 0]
+    g = arr[:, :, 1]
+    b = arr[:, :, 2]
     if _color_scheme != "none":
         r, g, b = apply_color_adjustment(r, g, b, _color_scheme)
-        r = r.astype(np.uint32, copy=False)
-        g = g.astype(np.uint32, copy=False)
-        b = b.astype(np.uint32, copy=False)
 
-    xrgb = 0xFF000000 | (r << 16) | (g << 8) | b
+    r32 = r.astype(np.uint32)
+    g32 = g.astype(np.uint32)
+    b32 = b.astype(np.uint32)
+    xrgb = 0xFF000000 | (r32 << 16) | (g32 << 8) | b32
     return np.ascontiguousarray(xrgb.T)
 
 

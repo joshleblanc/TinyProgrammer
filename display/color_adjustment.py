@@ -2,7 +2,10 @@
 Color Adjustment Layer for TinyProgrammer Display
 
 Applies Photoshop-style color adjustments to the entire rendered frame
-before writing to framebuffer. Works on numpy arrays for efficiency.
+before writing to framebuffer. Uses precomputed per-channel uint8 lookup
+tables so the runtime cost is a single vectorized index per channel —
+fast enough to keep up on the Pi Zero 2 W where float-based blending was
+the framebuffer bottleneck.
 """
 
 import numpy as np
@@ -28,160 +31,102 @@ COLOR_SCHEMES = {
     "mono_blue": {"mode": "desaturate", "color": (80, 140, 255), "intensity": 1.0},
 }
 
+# Module-level LUT cache. One entry per scheme name; built lazily on first use.
+_LUT_CACHE: dict = {}
+
 
 def apply_color_adjustment(r, g, b, scheme_name):
     """
-    Apply color adjustment to RGB numpy arrays.
+    Apply color adjustment to RGB uint8 numpy arrays via precomputed LUTs.
 
     Args:
-        r, g, b: numpy arrays of uint16 for each color channel
+        r, g, b: numpy arrays of uint8 for each color channel
         scheme_name: name of the color scheme to apply
 
     Returns:
-        Tuple of (r, g, b) adjusted numpy arrays
+        Tuple of (r, g, b) adjusted uint8 numpy arrays
     """
     if scheme_name == "none" or scheme_name not in COLOR_SCHEMES:
         return r, g, b
-
-    scheme = COLOR_SCHEMES[scheme_name]
-    if scheme is None:
+    if COLOR_SCHEMES[scheme_name] is None:
         return r, g, b
 
+    luts = _get_luts(scheme_name)
+    r_lut, g_lut, b_lut = luts["r_lut"], luts["g_lut"], luts["b_lut"]
+
+    if luts["mode"] == "desaturate":
+        # Rec. 601 luminance: 0.299*R + 0.587*G + 0.114*B. Integer approximation
+        # 77/256, 150/256, 29/256 (sums to 256, so >>8 normalizes). uint16
+        # intermediates avoid overflow from the channel sums.
+        r16 = r.astype(np.uint16)
+        g16 = g.astype(np.uint16)
+        b16 = b.astype(np.uint16)
+        lum = ((77 * r16 + 150 * g16 + 29 * b16) >> 8).astype(np.uint8)
+        return r_lut[lum], g_lut[lum], b_lut[lum]
+
+    return r_lut[r], g_lut[g], b_lut[b]
+
+
+def _get_luts(scheme_name: str) -> dict:
+    cached = _LUT_CACHE.get(scheme_name)
+    if cached is not None:
+        return cached
+
+    luts = _build_luts(scheme_name)
+    _LUT_CACHE[scheme_name] = luts
+    return luts
+
+
+def _build_luts(scheme_name: str) -> dict:
+    """Build per-channel uint8 LUTs for the given scheme."""
+    scheme = COLOR_SCHEMES[scheme_name]
     mode = scheme["mode"]
-    color = scheme["color"]
-    intensity = scheme["intensity"]
+    color = scheme.get("color") or (255, 255, 255)
+    intensity = float(scheme["intensity"])
+    cr, cg, cb = color
+
+    idx = np.arange(256, dtype=np.float32)
+    keep = 1.0 - intensity
 
     if mode == "multiply":
-        return apply_multiply(r, g, b, color, intensity)
+        rl = idx * keep + (idx * cr / 255.0) * intensity
+        gl = idx * keep + (idx * cg / 255.0) * intensity
+        bl = idx * keep + (idx * cb / 255.0) * intensity
     elif mode == "screen":
-        return apply_screen(r, g, b, color, intensity)
+        rl = idx * keep + (255.0 - (255.0 - idx) * (255.0 - cr) / 255.0) * intensity
+        gl = idx * keep + (255.0 - (255.0 - idx) * (255.0 - cg) / 255.0) * intensity
+        bl = idx * keep + (255.0 - (255.0 - idx) * (255.0 - cb) / 255.0) * intensity
     elif mode == "overlay":
-        return apply_overlay(r, g, b, color, intensity)
+        rl = idx * keep + _overlay_curve(idx, cr) * intensity
+        gl = idx * keep + _overlay_curve(idx, cg) * intensity
+        bl = idx * keep + _overlay_curve(idx, cb) * intensity
     elif mode == "invert":
-        return apply_invert(r, g, b, intensity)
+        curve = idx * keep + (255.0 - idx) * intensity
+        rl = gl = bl = curve
     elif mode == "desaturate":
-        return apply_desaturate(r, g, b, color, intensity)
+        # LUT input is luminance, not the original channel. At intensity=1.0
+        # (all current mono schemes) this is exact. At intensity<1.0 we blend
+        # the tint against luminance rather than the original channel, which
+        # is a slight deviation from the prior float implementation but
+        # preserves the "pull toward this tint" feel.
+        rl = idx * keep + (idx * cr / 255.0) * intensity
+        gl = idx * keep + (idx * cg / 255.0) * intensity
+        bl = idx * keep + (idx * cb / 255.0) * intensity
+    else:
+        rl = gl = bl = idx
 
-    return r, g, b
-
-
-def apply_multiply(r, g, b, color, intensity):
-    """
-    Multiply blend - tints/darkens the image.
-
-    Formula: output = input * color / 255
-    Then blend with original based on intensity.
-    """
-    cr, cg, cb = color
-
-    # Calculate multiplied values
-    r_mult = (r.astype(np.float32) * cr / 255.0)
-    g_mult = (g.astype(np.float32) * cg / 255.0)
-    b_mult = (b.astype(np.float32) * cb / 255.0)
-
-    # Blend between original and multiplied based on intensity
-    r_out = np.clip(r * (1 - intensity) + r_mult * intensity, 0, 255).astype(np.uint16)
-    g_out = np.clip(g * (1 - intensity) + g_mult * intensity, 0, 255).astype(np.uint16)
-    b_out = np.clip(b * (1 - intensity) + b_mult * intensity, 0, 255).astype(np.uint16)
-
-    return r_out, g_out, b_out
+    return {
+        "mode": mode,
+        "r_lut": np.clip(rl, 0, 255).astype(np.uint8),
+        "g_lut": np.clip(gl, 0, 255).astype(np.uint8),
+        "b_lut": np.clip(bl, 0, 255).astype(np.uint8),
+    }
 
 
-def apply_screen(r, g, b, color, intensity):
-    """
-    Screen blend - lightens the image.
-
-    Formula: output = 255 - ((255 - input) * (255 - color)) / 255
-    """
-    cr, cg, cb = color
-
-    # Calculate screened values
-    r_scr = 255 - ((255 - r.astype(np.float32)) * (255 - cr) / 255.0)
-    g_scr = 255 - ((255 - g.astype(np.float32)) * (255 - cg) / 255.0)
-    b_scr = 255 - ((255 - b.astype(np.float32)) * (255 - cb) / 255.0)
-
-    # Blend with original
-    r_out = np.clip(r * (1 - intensity) + r_scr * intensity, 0, 255).astype(np.uint16)
-    g_out = np.clip(g * (1 - intensity) + g_scr * intensity, 0, 255).astype(np.uint16)
-    b_out = np.clip(b * (1 - intensity) + b_scr * intensity, 0, 255).astype(np.uint16)
-
-    return r_out, g_out, b_out
-
-
-def apply_overlay(r, g, b, color, intensity):
-    """
-    Overlay blend - increases contrast while tinting.
-
-    Formula: if input < 128: 2 * input * color / 255
-             else: 255 - 2 * (255 - input) * (255 - color) / 255
-    """
-    cr, cg, cb = color
-
-    def overlay_channel(ch, c):
-        ch_f = ch.astype(np.float32)
-        # Overlay formula
-        result = np.where(
-            ch_f < 128,
-            2 * ch_f * c / 255.0,
-            255 - 2 * (255 - ch_f) * (255 - c) / 255.0
-        )
-        return result
-
-    r_ovl = overlay_channel(r, cr)
-    g_ovl = overlay_channel(g, cg)
-    b_ovl = overlay_channel(b, cb)
-
-    # Blend with original
-    r_out = np.clip(r * (1 - intensity) + r_ovl * intensity, 0, 255).astype(np.uint16)
-    g_out = np.clip(g * (1 - intensity) + g_ovl * intensity, 0, 255).astype(np.uint16)
-    b_out = np.clip(b * (1 - intensity) + b_ovl * intensity, 0, 255).astype(np.uint16)
-
-    return r_out, g_out, b_out
-
-
-def apply_invert(r, g, b, intensity):
-    """
-    Invert colors - creates a negative image effect.
-
-    Formula: output = 255 - input
-    """
-    r_inv = 255 - r.astype(np.float32)
-    g_inv = 255 - g.astype(np.float32)
-    b_inv = 255 - b.astype(np.float32)
-
-    # Blend with original based on intensity
-    r_out = np.clip(r * (1 - intensity) + r_inv * intensity, 0, 255).astype(np.uint16)
-    g_out = np.clip(g * (1 - intensity) + g_inv * intensity, 0, 255).astype(np.uint16)
-    b_out = np.clip(b * (1 - intensity) + b_inv * intensity, 0, 255).astype(np.uint16)
-
-    return r_out, g_out, b_out
-
-
-def apply_desaturate(r, g, b, color, intensity):
-    """
-    Desaturate to luminance, then tint by the given color.
-
-    Formula: lum = 0.299*R + 0.587*G + 0.114*B (Rec. 601)
-             output = lum * color / 255
-    Then blend with original based on intensity.
-    """
-    cr, cg, cb = color
-
-    r_f = r.astype(np.float32)
-    g_f = g.astype(np.float32)
-    b_f = b.astype(np.float32)
-
-    lum = 0.299 * r_f + 0.587 * g_f + 0.114 * b_f
-
-    r_tint = lum * cr / 255.0
-    g_tint = lum * cg / 255.0
-    b_tint = lum * cb / 255.0
-
-    r_out = np.clip(r_f * (1 - intensity) + r_tint * intensity, 0, 255).astype(np.uint16)
-    g_out = np.clip(g_f * (1 - intensity) + g_tint * intensity, 0, 255).astype(np.uint16)
-    b_out = np.clip(b_f * (1 - intensity) + b_tint * intensity, 0, 255).astype(np.uint16)
-
-    return r_out, g_out, b_out
+def _overlay_curve(idx, c):
+    low = 2.0 * idx * c / 255.0
+    high = 255.0 - 2.0 * (255.0 - idx) * (255.0 - c) / 255.0
+    return np.where(idx < 128, low, high)
 
 
 def get_available_schemes():
