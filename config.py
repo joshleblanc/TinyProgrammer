@@ -278,6 +278,11 @@ CORE_PROGRAMS = [
     "random_walker",
 ]
 
+# Generated canvas programs should fit the measured display budget on small
+# Raspberry Pi displays. Users with faster hardware can raise these.
+CANVAS_TARGET_FPS = float(os.environ.get("CANVAS_TARGET_FPS", "15"))
+CANVAS_MAX_DRAW_CALLS = int(os.environ.get("CANVAS_MAX_DRAW_CALLS", "150"))
+
 # Types of programs to generate (weighted)
 PROGRAM_TYPES = [
     # Motion & Physics
