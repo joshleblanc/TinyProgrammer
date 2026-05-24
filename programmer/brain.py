@@ -27,7 +27,11 @@ from programmer.code_typing import CodeTypingRenderer
 from programmer.error_log import log_error
 from programmer.liked_store import LikedStore
 from programmer.reminiscence import Reminiscence
-from archive.repository import Repository
+from archive.repository import (
+    CANVAS_PROTOCOL_BATCHED,
+    CANVAS_PROTOCOL_LEGACY,
+    Repository,
+)
 from archive.learning import LearningSystem
 import config
 
@@ -57,6 +61,7 @@ class Program:
     timestamp: float
     success: bool = False
     error_message: Optional[str] = None
+    canvas_protocol: str = CANVAS_PROTOCOL_LEGACY
 
 
 def _typing_delay_range() -> tuple[float, float]:
@@ -231,7 +236,7 @@ class Brain:
         time.sleep(config.STATE_TRANSITION_DELAY)
         self.state = new_state
 
-    def _program_environment(self) -> dict:
+    def _program_environment(self, canvas_batch: bool = True) -> dict:
         """Build the restricted subprocess environment for canvas programs."""
         python_paths = [self.archive.local_path]
         existing_pythonpath = os.environ.get("PYTHONPATH", "")
@@ -243,9 +248,10 @@ class Brain:
             "PYTHONPATH": os.pathsep.join(python_paths),
             "TINY_CANVAS_W": str(self.terminal.canvas_size[0]),
             "TINY_CANVAS_H": str(self.terminal.canvas_size[1]),
+            "TINY_CANVAS_BATCH": "1" if canvas_batch else "0",
         }
 
-    def _start_program_process(self, filepath: str):
+    def _start_program_process(self, filepath: str, canvas_batch: bool = True):
         """Start a canvas program with unbuffered output."""
         return subprocess.Popen(
             [sys.executable, "-u", filepath],
@@ -253,7 +259,7 @@ class Brain:
             stderr=subprocess.STDOUT,
             universal_newlines=True,
             bufsize=1,
-            env=self._program_environment(),
+            env=self._program_environment(canvas_batch=canvas_batch),
         )
 
     def _watch_running_process(self, status: str, mood: str,
@@ -275,6 +281,7 @@ class Brain:
         output_buffer = ""
         last_tick = time.monotonic()
         last_flip = 0.0
+        saw_flip = False
         FALLBACK_TICK_SECONDS = 0.05
         # Suppress fallback ticks while the program is actively emitting FLIP.
         # If no FLIP for FLIP_GRACE_SECONDS, assume program isn't using show()
@@ -323,9 +330,20 @@ class Brain:
 
                 if stripped == "CMD:FLIP":
                     now = time.monotonic()
+                    saw_flip = True
                     self.terminal.tick()
                     last_tick = now
                     last_flip = now
+                    continue
+
+                if stripped.startswith("CMDS:"):
+                    try:
+                        commands = json.loads(stripped[5:])
+                        if isinstance(commands, list):
+                            self.terminal.process_draw_commands(commands)
+                    except Exception:
+                        pass
+                    last_output = line + "\n"
                     continue
 
                 if stripped.startswith("CMD:"):
@@ -352,7 +370,7 @@ class Brain:
                 self.current_process.wait(timeout=1.0)
             except Exception:
                 self.current_process.kill()
-        return exit_code, last_output, stop_reason
+        return exit_code, last_output, stop_reason, saw_flip
     
     def _do_boot(self):
         """
@@ -668,11 +686,15 @@ class Brain:
         
         Let the program run for a while, display its output.
         """
-        exit_code, last_output, _ = self._watch_running_process(
+        exit_code, last_output, _, saw_flip = self._watch_running_process(
             "WATCHING",
             self.personality.get_mood_status(),
             "\n# Program finished early.\n",
         )
+        if self.current_program:
+            self.current_program.canvas_protocol = (
+                CANVAS_PROTOCOL_BATCHED if saw_flip else CANVAS_PROTOCOL_LEGACY
+            )
         if exit_code is None:
             self.current_program.success = True
             self._transition(State.ARCHIVE)
@@ -816,7 +838,8 @@ class Brain:
                 mood=self.personality.get_mood_status(),
                 success=self.current_program.success,
                 thought_process=self.current_program.thought_process,
-                error_message=self.current_program.error_message
+                error_message=self.current_program.error_message,
+                canvas_protocol=self.current_program.canvas_protocol,
             )
             self.terminal.type_string(f"\n# Saved to archive.\n")
         except Exception as e:
@@ -920,7 +943,14 @@ class Brain:
         filepath = self.archive.get_program_path(metadata)
         self.terminal.show_canvas()
         try:
-            self.current_process = self._start_program_process(filepath)
+            canvas_batch = (
+                getattr(metadata, "canvas_protocol", CANVAS_PROTOCOL_LEGACY)
+                == CANVAS_PROTOCOL_BATCHED
+            )
+            self.current_process = self._start_program_process(
+                filepath,
+                canvas_batch=canvas_batch,
+            )
         except Exception as e:
             self.terminal.hide_canvas()
             print(f"[Brain] Reminisce start failed for {metadata.filename}: {e}")
@@ -928,7 +958,7 @@ class Brain:
             self._after_reminisce()
             return
 
-        exit_code, last_output, stop_reason = self._watch_running_process(
+        exit_code, last_output, stop_reason, _ = self._watch_running_process(
             "REMINISCING",
             metadata.mood or self.personality.get_mood_status(),
             "\n# Reminisce replay finished early.\n",
