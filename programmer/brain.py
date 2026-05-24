@@ -59,6 +59,17 @@ class Program:
     error_message: Optional[str] = None
 
 
+def _typing_delay_range() -> tuple[float, float]:
+    """Return per-character delay bounds from live chars/sec config."""
+    min_cps = float(getattr(config, "TYPING_SPEED_MIN", 2) or 2)
+    max_cps = float(getattr(config, "TYPING_SPEED_MAX", 8) or 8)
+    min_cps = max(0.1, min_cps)
+    max_cps = max(0.1, max_cps)
+    if min_cps > max_cps:
+        min_cps, max_cps = max_cps, min_cps
+    return 1.0 / max_cps, 1.0 / min_cps
+
+
 class Brain:
     """
     Main state machine controlling Tiny Programmer behavior.
@@ -466,15 +477,14 @@ class Brain:
         self.terminal.set_status("WRITING", self.personality.get_mood_status())
         self.terminal.clear()
 
-        # Start with the header
-        header = self.llm.get_header(self.current_program.program_type if self.current_program else "")
-        self.terminal.type_string(header)
-        full_code = header
         code_typing = CodeTypingRenderer(
             self.terminal,
             skip_indent=getattr(config, "TYPING_SKIP_INDENT", False),
-            delay_range=(0.02, 0.08),
+            delay_range=_typing_delay_range(),
         )
+        header = self.llm.get_header(self.current_program.program_type if self.current_program else "")
+        code_typing.type_text(header)
+        full_code = header
 
         in_code_block = False
 
@@ -703,7 +713,7 @@ class Brain:
         code_typing = CodeTypingRenderer(
             self.terminal,
             skip_indent=getattr(config, "TYPING_SKIP_INDENT", False),
-            delay_range=(0.01, 0.05),
+            delay_range=_typing_delay_range(),
         )
 
         try:
