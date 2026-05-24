@@ -164,6 +164,32 @@
             </select>
             <p class="hint">Applies a color overlay to the entire display (like a Photoshop adjustment layer)</p>
         </div>
+
+        <div class="form-group">
+            <label for="web_stream_fps">Live Preview FPS</label>
+            <input type="number" name="web_stream_fps" id="web_stream_fps"
+                   value="{{ config.WEB_STREAM_FPS|int if config.WEB_STREAM_FPS is not none else 1 }}"
+                   min="1" max="30" step="1">
+            <p class="hint">Lower values reduce dashboard stream work on slower displays.</p>
+        </div>
+
+        <div class="form-group">
+            <label for="web_stream_scale">Live Preview Scale</label>
+            <select name="web_stream_scale" id="web_stream_scale">
+                {% for scale, label in stream_scale_options %}
+                <option value="{{ scale }}" {% if config.WEB_STREAM_SCALE|float == scale %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+            <p class="hint">Full size is easiest to read; smaller sizes reduce JPEG encoding cost.</p>
+        </div>
+
+        <div class="form-group">
+            <label for="web_stream_jpeg_quality">Live Preview JPEG Quality</label>
+            <input type="number" name="web_stream_jpeg_quality" id="web_stream_jpeg_quality"
+                   value="{{ config.WEB_STREAM_JPEG_QUALITY or 85 }}"
+                   min="20" max="95" step="1">
+            <p class="hint">Higher values preserve text clarity and increase stream bandwidth.</p>
+        </div>
     </section>
 
     <section class="settings-section">
