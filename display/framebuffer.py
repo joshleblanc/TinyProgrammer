@@ -65,15 +65,16 @@ def rgb888_to_rgb565(surface) -> np.ndarray:
     RGB565 format: RRRRR GGGGGG BBBBB (16 bits)
     """
     import pygame
-    # pixels3d is a view, avoiding the full RGB888 copy made by array3d().
+    # pixels3d is a view; take a uint8 channel copy so downstream ops do not
+    # read strided pixels3d views (those triggered visible block corruption
+    # on the Pi Zero, most pronounced when a channel was crushed low — e.g.,
+    # amber's blue x0.4).
     arr = pygame.surfarray.pixels3d(surface)  # Shape: (width, height, 3)
+    r = np.ascontiguousarray(arr[:, :, 0])
+    g = np.ascontiguousarray(arr[:, :, 1])
+    b = np.ascontiguousarray(arr[:, :, 2])
+    del arr  # release the pygame surface lock before further work
 
-    # Extract RGB channels as uint8 (views; LUT path consumes uint8 directly).
-    r = arr[:, :, 0]
-    g = arr[:, :, 1]
-    b = arr[:, :, 2]
-
-    # Apply color adjustment layer if active. Returns uint8 arrays.
     if _color_scheme != "none":
         r, g, b = apply_color_adjustment(r, g, b, _color_scheme)
 
@@ -92,10 +93,11 @@ def rgb888_to_xrgb8888(surface) -> np.ndarray:
     """Convert a pygame surface to a 32bpp XRGB/ARGB framebuffer array."""
     import pygame
     arr = pygame.surfarray.pixels3d(surface)  # Shape: (width, height, 3)
+    r = np.ascontiguousarray(arr[:, :, 0])
+    g = np.ascontiguousarray(arr[:, :, 1])
+    b = np.ascontiguousarray(arr[:, :, 2])
+    del arr
 
-    r = arr[:, :, 0]
-    g = arr[:, :, 1]
-    b = arr[:, :, 2]
     if _color_scheme != "none":
         r, g, b = apply_color_adjustment(r, g, b, _color_scheme)
 
