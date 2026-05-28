@@ -16,6 +16,30 @@ from .config_manager import ConfigManager
 # Global reference to brain (set by main.py)
 _brain = None
 
+STREAM_SCALE_OPTIONS = [
+    (1.0, "Full size"),
+    (0.75, "75%"),
+    (0.5, "50%"),
+    (0.25, "25%"),
+]
+STREAM_SCALE_VALUES = {value for value, _label in STREAM_SCALE_OPTIONS}
+
+
+def _bounded_int(value, default, minimum, maximum):
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _bounded_float(value, default, minimum, maximum):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
 
 def set_brain(brain):
     """Set the brain instance for status access."""
@@ -215,17 +239,26 @@ def create_app():
         if not config.WEB_STREAM_ENABLED:
             return "Stream not enabled. Set WEB_STREAM_ENABLED=true to activate.", 404
 
-        from display.frame_stream import get_frame
+        from display.frame_stream import placeholder_frame, register_client, unregister_client, wait_for_frame
+
+        def mjpeg_part(frame):
+            return (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+            )
 
         def generate():
-            while True:
-                frame = get_frame()
-                if frame:
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-                    )
-                time.sleep(0.05)  # ~20fps cap for the stream
+            sequence = 0
+            register_client()
+            try:
+                frame, sequence = wait_for_frame(sequence, timeout=0)
+                yield mjpeg_part(frame or placeholder_frame())
+
+                while True:
+                    frame, sequence = wait_for_frame(sequence, timeout=1.0)
+                    yield mjpeg_part(frame or placeholder_frame())
+            finally:
+                unregister_client()
 
         return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
@@ -279,6 +312,29 @@ def create_app():
             color_scheme = request.form.get('color_scheme', 'none')
             updates['COLOR_SCHEME'] = color_scheme
 
+            # Dashboard live preview stream tuning
+            updates['WEB_STREAM_FPS'] = _bounded_int(
+                request.form.get('web_stream_fps', 1),
+                default=1,
+                minimum=1,
+                maximum=30,
+            )
+            stream_scale = _bounded_float(
+                request.form.get('web_stream_scale', 1.0),
+                default=1.0,
+                minimum=0.1,
+                maximum=1.0,
+            )
+            updates['WEB_STREAM_SCALE'] = (
+                stream_scale if stream_scale in STREAM_SCALE_VALUES else 1.0
+            )
+            updates['WEB_STREAM_JPEG_QUALITY'] = _bounded_int(
+                request.form.get('web_stream_jpeg_quality', 85),
+                default=85,
+                minimum=20,
+                maximum=95,
+            )
+
             # BBS settings
             updates['BBS_ENABLED'] = 'bbs_enabled' in request.form
             updates['BBS_BREAK_CHANCE'] = float(request.form.get('bbs_break_chance', 0.3))
@@ -309,10 +365,13 @@ def create_app():
             if interface_theme != previous_chrome_backend:
                 message = (
                     "Settings saved! Interface theme changes require restarting "
-                    "TinyProgrammer; other changes will apply on the next program cycle."
+                    "TinyProgrammer; stream and color changes apply immediately."
                 )
             else:
-                message = "Settings saved! Changes will apply on next program cycle."
+                message = (
+                    "Settings saved! Stream and color changes apply immediately; "
+                    "other changes will apply on next program cycle."
+                )
 
         # Load current config
         current = config_mgr.get_all()
@@ -339,7 +398,8 @@ def create_app():
                              available_models=models_for_template,
                              current_model=current_model,
                              interface_themes=_config.DISPLAY_CHROME_CHOICES,
-                             color_schemes=color_schemes)
+                             color_schemes=color_schemes,
+                             stream_scale_options=STREAM_SCALE_OPTIONS)
 
     @app.route('/prompt', methods=['GET', 'POST'])
     def prompt_editor():

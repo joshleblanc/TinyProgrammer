@@ -6,6 +6,27 @@ from display.layout import REFERENCE_LAYOUT_OFFSET_Y as _REFERENCE_LAYOUT_OFFSET
 from display.layout import scale_floor as _scale_floor
 from display.layout import scale_round_half_up as _scale_round_half_up
 
+
+def _env_float(name, default):
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _env_int(name, default):
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 # Tiny Programmer Configuration
 VERSION = "0.3.5"
 
@@ -179,8 +200,8 @@ LLM_STOP_TOKENS = ["```", "# END", "if __name__"]
 # =============================================================================
 
 # Typing speed (characters per second) - will vary by mood
-TYPING_SPEED_MIN = 2
-TYPING_SPEED_MAX = 8
+TYPING_SPEED_MIN = 15
+TYPING_SPEED_MAX = 50
 
 # Opt-in jump over leading indentation while generated code is typed.
 TYPING_SKIP_INDENT = False
@@ -257,6 +278,11 @@ CORE_PROGRAMS = [
     "random_walker",
 ]
 
+# Generated canvas programs should fit the measured display budget on small
+# Raspberry Pi displays. Users with faster hardware can raise these.
+CANVAS_TARGET_FPS = float(os.environ.get("CANVAS_TARGET_FPS", "15"))
+CANVAS_MAX_DRAW_CALLS = int(os.environ.get("CANVAS_MAX_DRAW_CALLS", "150"))
+
 # Types of programs to generate (weighted)
 PROGRAM_TYPES = [
     # Motion & Physics
@@ -327,6 +353,9 @@ WEB_ENABLED = True
 WEB_HOST = "0.0.0.0"   # Listen on all interfaces
 WEB_PORT = 5000
 WEB_STREAM_ENABLED = os.environ.get("WEB_STREAM_ENABLED", "false").lower() in ("1", "true", "yes")
+WEB_STREAM_FPS = max(1.0, min(30.0, _env_float("WEB_STREAM_FPS", 1.0)))
+WEB_STREAM_SCALE = max(0.1, min(1.0, _env_float("WEB_STREAM_SCALE", 1.0)))
+WEB_STREAM_JPEG_QUALITY = max(20, min(95, _env_int("WEB_STREAM_JPEG_QUALITY", 85)))
 
 # =============================================================================
 # DISPLAY COLOR SCHEME

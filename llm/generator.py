@@ -88,6 +88,23 @@ def _ensure_show_calls(code: str) -> str:
     return "\n".join(result)
 
 
+def _canvas_frame_budget() -> tuple[float, str, int]:
+    target_fps = float(getattr(config, "CANVAS_TARGET_FPS", 15) or 15)
+    target_fps = max(1.0, min(60.0, target_fps))
+    sleep_seconds = 1.0 / target_fps
+    max_draw_calls = int(getattr(config, "CANVAS_MAX_DRAW_CALLS", 150) or 150)
+    max_draw_calls = max(10, max_draw_calls)
+    return target_fps, f"{sleep_seconds:.3f}", max_draw_calls
+
+
+def _canvas_budget_rules() -> str:
+    target_fps, sleep_seconds, max_draw_calls = _canvas_frame_budget()
+    return (
+        f"- Aim for about {target_fps:g} FPS: call c.show() then c.sleep({sleep_seconds}) at end of each frame\n"
+        f"- Keep each frame under about {max_draw_calls} draw calls; prefer moving fewer simple shapes over redrawing huge grids\n"
+    )
+
+
 class LLMGenerator:
     """
     Interface to LLM for code generation via OpenRouter.
@@ -358,6 +375,7 @@ class LLMGenerator:
         # Get canvas dimensions from config
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
+        budget_rules = _canvas_budget_rules()
 
         # Creative direction from dimensions dict
         creative_block = ""
@@ -385,8 +403,7 @@ class LLMGenerator:
             "- Start with variables, then while True loop\n"
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n"
             "- RGB values are integers 0-255 (NOT floats 0.0-1.0)\n"
-            "- ALWAYS call c.show() then c.sleep(0.033) at end of each frame\n"
-            "- Use simple shapes, avoid too many draw calls per frame\n"
+            f"{budget_rules}"
             "- Add short casual comments like a human thinking out loud\n"
             "  e.g. '# hmm let's try a spiral', '# this should bounce nicely'\n\n"
             "ONLY these methods exist on 'c':\n"
@@ -414,6 +431,7 @@ class LLMGenerator:
         description = _resolve_description(program_type)
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
+        budget_rules = _canvas_budget_rules()
 
         palette = ""
         if creative and creative.get("palette"):
@@ -424,8 +442,9 @@ class LLMGenerator:
             f"{palette}\n"
             "RULES:\n"
             "- 20-50 lines of code, no imports\n"
-            "- while True loop, call c.show() then c.sleep(0.033) each frame\n"
+            "- Start with variables, then while True loop\n"
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n\n"
+            f"{budget_rules}\n"
             "Methods on 'c': clear, pixel, line, rect, fill_rect, circle, fill_circle, show, sleep\n"
             "All draw methods take r,g,b after coordinates. c.show() takes no args.\n\n"
             "Output ONLY Python code.\n"
@@ -435,6 +454,8 @@ class LLMGenerator:
     def _build_wireframe_prompt(self, lessons: str = "") -> str:
         """Special prompt for wireframe_plot — uses the Plot3D helper."""
         lessons_text = f"Remember: {lessons}\n\n" if lessons else ""
+        _, _, max_draw_calls = _canvas_frame_budget()
+        grid_max = max(10, min(18, int((max_draw_calls / 2) ** 0.5) + 8))
 
         prompt = (
             f"{lessons_text}"
@@ -443,7 +464,7 @@ class LLMGenerator:
             "p and call p.run(func) at the end.\n\n"
             "Plot3D API (the only methods you need):\n"
             "  p.set_range(x=(min,max), y=(min,max))    # default (-5, 5)\n"
-            "  p.set_grid(steps=20)                       # 10-30 recommended\n"
+            f"  p.set_grid(steps={grid_max})                       # 10-{grid_max} recommended on small displays\n"
             "  p.set_rotation_speed(1.5)                  # degrees per frame\n"
             "  p.run(func)                                # func(x, y) -> z, starts loop\n\n"
             "Write a surface function that's visually interesting. Not just sin(x+y).\n"
@@ -469,6 +490,7 @@ class LLMGenerator:
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
         code = _ensure_show_calls(code)
+        budget_rules = _canvas_budget_rules()
 
         prompt = (
             "Here's a Python program the user enjoyed:\n\n"
@@ -485,8 +507,7 @@ class LLMGenerator:
             "- Start with variables, then while True loop\n"
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n"
             "- RGB values are integers 0-255 (NOT floats 0.0-1.0)\n"
-            "- ALWAYS call c.show() then c.sleep(0.033) at end of each frame\n"
-            "- Use simple shapes, avoid too many draw calls per frame\n\n"
+            f"{budget_rules}\n"
             "ONLY these methods exist on 'c':\n"
             "  c.clear(r,g,b)\n"
             "  c.pixel(x,y,r,g,b)\n"
