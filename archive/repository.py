@@ -39,6 +39,7 @@ class ProgramMetadata:
     success: bool              # Did it run successfully?
     lines_of_code: int
     thought_process: str       # The thinking comments
+    model: Optional[str] = None  # Actual LLM model id used for generation
     error_message: Optional[str] = None
     screenshot_path: Optional[str] = None
     synced_to_github: bool = False
@@ -109,6 +110,7 @@ class Repository:
     
     def save(self, code: str, program_type: str, mood: str,
              success: bool, thought_process: str = "",
+             model: Optional[str] = None,
              error_message: Optional[str] = None,
              canvas_protocol: str = CANVAS_PROTOCOL_LEGACY) -> Optional[ProgramMetadata]:
         """
@@ -120,6 +122,7 @@ class Repository:
             mood: Mood when written
             success: Whether it ran successfully
             thought_process: Thinking comments
+            model: Actual LLM model id used for generation
             error_message: Error if failed
             canvas_protocol: Canvas output protocol validated during the run
             
@@ -149,6 +152,7 @@ class Repository:
             success=success,
             lines_of_code=len(code.strip().split('\n')),
             thought_process=thought_process,
+            model=model,
             error_message=error_message,
             synced_to_github=False,
             canvas_protocol=normalize_canvas_protocol(canvas_protocol),
