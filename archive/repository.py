@@ -11,8 +11,21 @@ import os
 import json
 import time
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from dataclasses import dataclass, asdict
+
+
+CANVAS_PROTOCOL_LEGACY = "legacy"
+CANVAS_PROTOCOL_BATCHED = "batched"
+CANVAS_PROTOCOLS = {CANVAS_PROTOCOL_LEGACY, CANVAS_PROTOCOL_BATCHED}
+
+
+def normalize_canvas_protocol(value: str) -> str:
+    """Return a known canvas protocol, defaulting old metadata to legacy."""
+    protocol = str(value or CANVAS_PROTOCOL_LEGACY).strip().lower()
+    if protocol not in CANVAS_PROTOCOLS:
+        return CANVAS_PROTOCOL_LEGACY
+    return protocol
 
 
 @dataclass
@@ -26,9 +39,14 @@ class ProgramMetadata:
     success: bool              # Did it run successfully?
     lines_of_code: int
     thought_process: str       # The thinking comments
+    model: Optional[str] = None  # Actual LLM model id used for generation
     error_message: Optional[str] = None
     screenshot_path: Optional[str] = None
     synced_to_github: bool = False
+    canvas_protocol: str = CANVAS_PROTOCOL_LEGACY
+
+    def __post_init__(self):
+        self.canvas_protocol = normalize_canvas_protocol(self.canvas_protocol)
 
 
 class Repository:
@@ -57,6 +75,7 @@ class Repository:
         
         self.index_path = os.path.join(local_path, "index.json")
         self.index: List[ProgramMetadata] = []
+        self._replayable_cache: Dict[str, Tuple[Tuple[int, int], bool]] = {}
         
         self._ensure_directories()
         self._load_index()
@@ -91,7 +110,9 @@ class Repository:
     
     def save(self, code: str, program_type: str, mood: str,
              success: bool, thought_process: str = "",
-             error_message: Optional[str] = None) -> Optional[ProgramMetadata]:
+             model: Optional[str] = None,
+             error_message: Optional[str] = None,
+             canvas_protocol: str = CANVAS_PROTOCOL_LEGACY) -> Optional[ProgramMetadata]:
         """
         Save a program to the archive.
         
@@ -101,7 +122,9 @@ class Repository:
             mood: Mood when written
             success: Whether it ran successfully
             thought_process: Thinking comments
+            model: Actual LLM model id used for generation
             error_message: Error if failed
+            canvas_protocol: Canvas output protocol validated during the run
             
         Returns:
             Created metadata or None if not saved
@@ -129,8 +152,10 @@ class Repository:
             success=success,
             lines_of_code=len(code.strip().split('\n')),
             thought_process=thought_process,
+            model=model,
             error_message=error_message,
-            synced_to_github=False
+            synced_to_github=False,
+            canvas_protocol=normalize_canvas_protocol(canvas_protocol),
         )
         
         # Update index
@@ -174,6 +199,45 @@ class Repository:
     def get_recent(self, count: int = 10) -> List[ProgramMetadata]:
         """Get most recent programs."""
         return self.index[-count:]
+
+    def get_program_path(self, metadata: ProgramMetadata) -> str:
+        """Get the archived source path for a program."""
+        return os.path.join(self.local_path, "programs", metadata.filename)
+
+    def get_replay_candidates(self) -> List[ProgramMetadata]:
+        """Get successful archived programs that are safe to replay."""
+        return [
+            metadata for metadata in self.index
+            if self._is_replayable(metadata)
+        ]
+
+    def _is_replayable(self, metadata: ProgramMetadata) -> bool:
+        """Return whether an archived program can be parsed for replay."""
+        if not metadata.success:
+            return False
+
+        path = self.get_program_path(metadata)
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return False
+
+        cache_key = metadata.filename or metadata.id
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        cached = self._replayable_cache.get(cache_key)
+        if cached and cached[0] == stamp:
+            return cached[1]
+
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                source = f.read()
+            compile(source, path, 'exec')
+            replayable = True
+        except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+            replayable = False
+
+        self._replayable_cache[cache_key] = (stamp, replayable)
+        return replayable
     
     # =========================================================================
     # GITHUB SYNC (FUTURE IMPLEMENTATION)

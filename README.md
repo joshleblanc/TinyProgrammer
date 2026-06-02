@@ -28,6 +28,7 @@ TinyProgrammer runs an infinite loop:
 6. **ARCHIVE** saves the code and metadata to disk
 7. **REFLECT** asks the LLM what it learned, stores the lesson
 8. **BBS BREAK** (30% chance) visits TinyBBS to browse posts, share code, or lurk
+9. **REMINISCE** (optional) replays successful archived creations after BBS sessions
 
 The device has a mood system (hopeful, proud, frustrated, tired, playful...) that affects which programs it writes, how it types, and how it behaves on the BBS.
 
@@ -36,7 +37,7 @@ After work hours, a **Starry Night screensaver** takes over, a city skyline with
 ## Requirements (Raspberry Pi)
 
 - **Raspberry Pi** (tested on Pi 4B and Pi Zero 2 W)
-- **Display** any framebuffer-compatible screen (HDMI or SPI TFT)
+- **Display** any framebuffer-compatible screen (HDMI, SPI TFT, or supported KMS DPI panel)
 - **Python 3.11+**
 - **OpenRouter API key** sign up at [openrouter.ai](https://openrouter.ai) and create an API key. TinyProgrammer uses cheap/fast models (Haiku, Gemini Flash, GPT-4.1 Mini, etc.) so costs are minimal. (0.15usd/day in default settings can be lowered much more)
 - **Network connection** needed for OpenRouter API and BBS
@@ -59,15 +60,15 @@ sudo apt install libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev
 
 ## Hardware
 
-TinyProgrammer should run on any Raspberry Pi with a display. Two tested configurations:
+TinyProgrammer should run on any Raspberry Pi with a display. Tested or targeted configurations:
 
-|            | Pi 4 (HDMI)                     | Pi Zero 2 W (SPI)                  |
-| ---------- | ------------------------------- | ---------------------------------- |
-| Board      | Raspberry Pi 4B                 | Raspberry Pi Zero 2 W              |
-| Display    | Waveshare 4" HDMI LCD (800x480) | Waveshare 4" SPI TFT (480x320)     |
-| Profile    | `pi4-hdmi`                      | `pizero-spi`                       |
-| FPS        | 60                              | 30                                 |
-| Connection | HDMI, no driver needed          | SPI, requires Waveshare LCD driver |
+|            | Pi 4 (HDMI)                     | Pi Zero 2 W (SPI)                  | Pi Zero 2 W (DPI)                         |
+| ---------- | ------------------------------- | ---------------------------------- | ----------------------------------------- |
+| Board      | Raspberry Pi 4B                 | Raspberry Pi Zero 2 W              | Raspberry Pi Zero 2 W                     |
+| Display    | Waveshare 4" HDMI LCD (800x480) | Waveshare 4" SPI TFT (480x320)     | Waveshare 4inch DPI LCD (C), 720x720      |
+| Profile    | `pi4-hdmi`                      | `pizero-spi`                       | `waveshare-4dpi-720`                      |
+| FPS        | 60                              | 30                                 | 30                                        |
+| Connection | HDMI, no driver needed          | SPI, requires Waveshare LCD driver | GPIO DPI, requires Waveshare KMS overlays |
 
 Other displays should work too, set `DISPLAY_WIDTH` and `DISPLAY_HEIGHT` in `config.py` and provide a matching background image (`display/assets/bg-WxH.png`). The layout auto-scales from a 480x320 reference design.
 
@@ -91,6 +92,15 @@ cd LCD-show && chmod +x LCD4-show && sudo ./LCD4-show
 ```
 
 After reboot, run the install command above.
+
+**Pi Zero 2 W with Waveshare 4inch DPI LCD (C):** After the quick install
+finishes, configure the display overlays from the checkout:
+
+```bash
+cd ~/TinyProgrammer
+./scripts/setup-waveshare-4dpi-720.sh
+sudo reboot
+```
 
 ### Manual install
 
@@ -129,7 +139,10 @@ nano .env
 
 ```bash
 # Required: your display type
-DISPLAY_PROFILE=pi4-hdmi          # or pizero-spi
+DISPLAY_PROFILE=pi4-hdmi          # or pizero-spi, waveshare-4dpi-720
+
+# Optional: display chrome renderer
+DISPLAY_CHROME_BACKEND=asset      # or system6 for scalable procedural chrome
 
 # Required: LLM API key (get one at https://openrouter.ai)
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -222,7 +235,7 @@ On first run this downloads the base image and builds the container — subseque
 
 Visit **http://localhost:5001** once the container is running. This is your window into what TinyProgrammer is doing: current state, mood, program history, model settings, timing controls, and more.
 
-You'll see log output in the terminal showing each phase (THINK → WRITE → RUN → ARCHIVE → REFLECT).
+You'll see log output in the terminal showing each phase (THINK → WRITE → REVIEW → RUN → WATCH → ARCHIVE → REFLECT), with optional BBS BREAK and REMINISCE states.
 
 ### 5. Browse generated programs
 
@@ -286,7 +299,7 @@ Once running, access the dashboard at `http://<pi-ip>:5000` to:
 - Monitor current state, mood, and programs written
 - Switch LLM models or enable "Surprise Me" (random model per program)
 - Adjust typing speed, watch duration, and other timing
-- Toggle BBS settings and work schedule
+- Toggle BBS, REMINISCE, and work schedule settings
 - Start/stop screensaver manually
 - Customize program type weights and prompts
 - Apply display color schemes (amber, green, night, etc.)
@@ -295,16 +308,21 @@ Once running, access the dashboard at `http://<pi-ip>:5000` to:
 
 All settings are in `config.py` and can be overridden via the web dashboard (saved to `config_overrides.json`).
 
-| Setting              | Default    | Description                                             |
-| -------------------- | ---------- | ------------------------------------------------------- |
-| `DISPLAY_PROFILE`    | `pi4-hdmi` | Display target (`pi4-hdmi` or `pizero-spi`)             |
-| `BBS_ENABLED`        | `True`     | Enable BBS social breaks                                |
-| `BBS_BREAK_CHANCE`   | `0.3`      | Probability of BBS break after each coding cycle        |
-| `BBS_DISPLAY_COLOR`  | `green`    | BBS terminal color (`green`, `amber`, `white`)          |
-| `SCHEDULE_ENABLED`   | `False`    | Enable work schedule (screensaver after hours)          |
-| `SCHEDULE_CLOCK_IN`  | `9`        | Hour to start coding (0-23)                             |
-| `SCHEDULE_CLOCK_OUT` | `23`       | Hour to stop coding (0-23)                              |
-| `COLOR_SCHEME`       | `none`     | Display color overlay (`amber`, `green`, `night`, etc.) |
+| Setting                          | Default    | Description                                                        |
+| -------------------------------- | ---------- | ------------------------------------------------------------------ |
+| `DISPLAY_PROFILE`                | `pi4-hdmi` | Display target (`pi4-hdmi`, `pizero-spi`, or `waveshare-4dpi-720`) |
+| `DISPLAY_CHROME_BACKEND`         | `asset`    | Chrome renderer (`asset` PNGs or opt-in `system6` procedural)      |
+| `BBS_ENABLED`                    | `True`     | Enable BBS social breaks                                           |
+| `BBS_BREAK_CHANCE`               | `0.3`      | Probability of BBS break after each coding cycle                   |
+| `BBS_DISPLAY_COLOR`              | `green`    | BBS terminal color (`green`, `amber`, `white`)                     |
+| `REMINISCE_ENABLED`              | `False`    | Enable archive replay after completed BBS breaks                   |
+| `REMINISCE_ENTRY_PROBABILITY`    | `0.7`      | Probability of starting REMINISCE after BBS                        |
+| `REMINISCE_LOOP_PROBABILITY`     | `0.50`     | Probability of replaying another archived creation                 |
+| `REMINISCE_INTRO_PAUSE_SECONDS`  | `3.0`      | Delay between REMINISCE intro text and canvas replay               |
+| `SCHEDULE_ENABLED`               | `False`    | Enable work schedule (screensaver after hours)                     |
+| `SCHEDULE_CLOCK_IN`              | `9`        | Hour to start coding (0-23)                                        |
+| `SCHEDULE_CLOCK_OUT`             | `23`       | Hour to stop coding (0-23)                                         |
+| `COLOR_SCHEME`                   | `none`     | Display color overlay (`amber`, `green`, `night`, etc.)            |
 
 ## Project structure
 
@@ -313,7 +331,8 @@ TinyProgrammer/
 ├── main.py                 # Entry point, clock in/out loop
 ├── config.py               # All configuration (auto-scales by display profile)
 ├── programmer/
-│   ├── brain.py            # State machine (think/write/run/watch/bbs/reflect)
+│   ├── brain.py            # State machine (think/write/run/watch/bbs/reminisce)
+│   ├── reminiscence.py     # REMINISCE archive replay selection + intro text
 │   └── personality.py      # Mood system, typing quirks
 ├── display/
 │   ├── terminal.py         # Pygame display (IDE + BBS + screensaver)
@@ -407,7 +426,7 @@ grep DISPLAY_PROFILE ~/TinyProgrammer/.env
 ls -la /dev/fb0
 ```
 
-**Quick fixes:** set `DISPLAY_PROFILE=pi4-hdmi` in `.env` for HDMI displays, `pizero-spi` for SPI screens. Make sure the service runs as root (it needs framebuffer access).
+**Quick fixes:** set `DISPLAY_PROFILE=pi4-hdmi` in `.env` for HDMI displays, `pizero-spi` for SPI screens, or `waveshare-4dpi-720` for the Waveshare 4inch DPI LCD (C). Make sure the service runs as root (it needs framebuffer access). On the Waveshare 720x720 panel, rerun `./scripts/setup-waveshare-4dpi-720.sh` and reboot so `/boot/firmware/config.txt` and the `.dtbo` overlays are active.
 
 ### Display shows the desktop instead of TinyProgrammer
 

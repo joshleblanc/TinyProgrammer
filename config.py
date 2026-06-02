@@ -1,7 +1,34 @@
 import os
 
+from display.layout import CANVAS_REFERENCE as _CANVAS_REFERENCE
+from display.layout import REFERENCE_LAYOUT_OFFSET_X as _REFERENCE_LAYOUT_OFFSET_X
+from display.layout import REFERENCE_LAYOUT_OFFSET_Y as _REFERENCE_LAYOUT_OFFSET_Y
+from display.layout import scale_floor as _scale_floor
+from display.layout import scale_round_half_up as _scale_round_half_up
+
+
+def _env_float(name, default):
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _env_int(name, default):
+    value = os.environ.get(name, "")
+    if value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 # Tiny Programmer Configuration
-VERSION = "0.3.2"
+VERSION = "0.3.5"
 
 # =============================================================================
 # DISPLAY — auto-scaled from 480x320 reference layout
@@ -10,6 +37,7 @@ VERSION = "0.3.2"
 #   "pi4-hdmi"   → 800x480, 16pt font, 60fps (default)
 #   "1080p"      → 1920x1080, 34pt font, 60fps
 #   "pizero-spi" → 480x320, 12pt font, 30fps
+#   "waveshare-4dpi-720" → 720x720, 16pt font, 30fps
 
 DISPLAY_PROFILE = os.environ.get("DISPLAY_PROFILE", "pi4-hdmi")
 
@@ -26,6 +54,13 @@ elif DISPLAY_PROFILE == "pizero-spi":
     FONT_SIZE = 12
     CHAR_WIDTH = 8
     CHAR_HEIGHT = 16
+    TARGET_FPS = 30
+elif DISPLAY_PROFILE == "waveshare-4dpi-720":
+    DISPLAY_WIDTH = 720
+    DISPLAY_HEIGHT = 720
+    FONT_SIZE = 16
+    CHAR_WIDTH = 10
+    CHAR_HEIGHT = 24
     TARGET_FPS = 30
 elif DISPLAY_PROFILE == "1080p":
     DISPLAY_WIDTH = 1920
@@ -59,9 +94,30 @@ COLOR_DIM = (128, 128, 128)     # Dimmed text for comments
 # Font settings (Space Mono from Google Fonts)
 FONT_NAME = "SpaceMono-Regular"
 
+# Chrome renderer: "asset" keeps the existing PNG-backed UI. "system6" enables
+# the opt-in scalable procedural chrome.
+CHROME_BACKEND_ASSET = "asset"
+CHROME_BACKEND_SYSTEM6 = "system6"
+DISPLAY_CHROME_CHOICES = {
+    CHROME_BACKEND_ASSET: "Default",
+    CHROME_BACKEND_SYSTEM6: "System 6 (experimental)",
+}
+
+
+def normalize_display_chrome_backend(value):
+    backend = str(value or CHROME_BACKEND_ASSET).strip().lower()
+    if backend not in DISPLAY_CHROME_CHOICES:
+        return CHROME_BACKEND_ASSET
+    return backend
+
+
+DISPLAY_CHROME_BACKEND = normalize_display_chrome_backend(
+    os.environ.get("DISPLAY_CHROME_BACKEND", CHROME_BACKEND_ASSET)
+)
+
 # Global offset to align with background
-LAYOUT_OFFSET_X = int(2 * _SX + 0.5)
-LAYOUT_OFFSET_Y = int(1 * _SY + 0.5)
+LAYOUT_OFFSET_X = _scale_round_half_up(_REFERENCE_LAYOUT_OFFSET_X, _SX)
+LAYOUT_OFFSET_Y = _scale_round_half_up(_REFERENCE_LAYOUT_OFFSET_Y, _SY)
 
 # Layout regions — computed from 480x320 reference coordinates
 SIDEBAR_X = int(5 * _SX) + LAYOUT_OFFSET_X
@@ -80,19 +136,27 @@ LINE_NUM_W = int(25 * _SX)
 STATUS_BAR_Y = int(289 * _SY) + LAYOUT_OFFSET_Y
 STATUS_BAR_HEIGHT = int(24 * _SY)
 
+if DISPLAY_PROFILE == "waveshare-4dpi-720":
+    # Space Mono line numbers are rendered as a 3-character right-aligned
+    # string. With the smaller 720px profile font, the generic scaled gutter
+    # pushes the visible digits too close to the code divider.
+    LINE_NUM_SIDEBAR_OVERLAP_PX = 5
+    LINE_NUM_X = SIDEBAR_X + SIDEBAR_W - LINE_NUM_SIDEBAR_OVERLAP_PX
+    LINE_NUM_W = CODE_AREA_X - LINE_NUM_X
+
 # Display modes
 MODE_TERMINAL = "terminal"
 MODE_RUN = "run"
 
 # Canvas popup window — scaled from 480x320 reference
-CANVAS_X = int(29 * _SX) + LAYOUT_OFFSET_X
-CANVAS_Y = int(35 * _SY) + LAYOUT_OFFSET_Y
-CANVAS_W = int(422 * _SX)
-CANVAS_H = int(242 * _SY)
-CANVAS_DRAW_OFFSET_X = int(3 * _SX)
-CANVAS_DRAW_OFFSET_Y = int(19 * _SY)
-CANVAS_DRAW_W = int(416 * _SX)
-CANVAS_DRAW_H = int(212 * _SY)
+CANVAS_X = _scale_floor(_CANVAS_REFERENCE.window.x, _SX) + LAYOUT_OFFSET_X
+CANVAS_Y = _scale_floor(_CANVAS_REFERENCE.window.y, _SY) + LAYOUT_OFFSET_Y
+CANVAS_W = _scale_floor(_CANVAS_REFERENCE.window.w, _SX)
+CANVAS_H = _scale_floor(_CANVAS_REFERENCE.window.h, _SY)
+CANVAS_DRAW_OFFSET_X = _scale_floor(_CANVAS_REFERENCE.content_offset_x, _SX)
+CANVAS_DRAW_OFFSET_Y = _scale_floor(_CANVAS_REFERENCE.content_offset_y, _SY)
+CANVAS_DRAW_W = _scale_floor(_CANVAS_REFERENCE.content_w, _SX)
+CANVAS_DRAW_H = _scale_floor(_CANVAS_REFERENCE.content_h, _SY)
 
 # =============================================================================
 # LLM
@@ -137,8 +201,11 @@ LLM_STOP_TOKENS = ["```", "# END", "if __name__"]
 # =============================================================================
 
 # Typing speed (characters per second) - will vary by mood
-TYPING_SPEED_MIN = 2
-TYPING_SPEED_MAX = 8
+TYPING_SPEED_MIN = 15
+TYPING_SPEED_MAX = 50
+
+# Opt-in jump over leading indentation while generated code is typed.
+TYPING_SKIP_INDENT = False
 
 # Probability of making a typo (0.0 - 1.0)
 TYPO_PROBABILITY = 0.02
@@ -162,6 +229,12 @@ THINK_DURATION_MAX = 10
 # How long to run a program before moving on (seconds)
 WATCH_DURATION_MIN = 120
 WATCH_DURATION_MAX = 120
+
+# Optional archive-replay screensaver after BBS sessions
+REMINISCE_ENABLED = False
+REMINISCE_ENTRY_PROBABILITY = 0.7
+REMINISCE_LOOP_PROBABILITY = 0.50
+REMINISCE_INTRO_PAUSE_SECONDS = 3.0
 
 # Delay between state transitions
 STATE_TRANSITION_DELAY = 2
@@ -205,6 +278,11 @@ CORE_PROGRAMS = [
     "fractal_tree",
     "random_walker",
 ]
+
+# Generated canvas programs should fit the measured display budget on small
+# Raspberry Pi displays. Users with faster hardware can raise these.
+CANVAS_TARGET_FPS = float(os.environ.get("CANVAS_TARGET_FPS", "15"))
+CANVAS_MAX_DRAW_CALLS = int(os.environ.get("CANVAS_MAX_DRAW_CALLS", "150"))
 
 # Types of programs to generate (weighted)
 PROGRAM_TYPES = [
@@ -276,6 +354,9 @@ WEB_ENABLED = True
 WEB_HOST = "0.0.0.0"   # Listen on all interfaces
 WEB_PORT = 5000
 WEB_STREAM_ENABLED = os.environ.get("WEB_STREAM_ENABLED", "false").lower() in ("1", "true", "yes")
+WEB_STREAM_FPS = max(1.0, min(30.0, _env_float("WEB_STREAM_FPS", 1.0)))
+WEB_STREAM_SCALE = max(0.1, min(1.0, _env_float("WEB_STREAM_SCALE", 1.0)))
+WEB_STREAM_JPEG_QUALITY = max(20, min(95, _env_int("WEB_STREAM_JPEG_QUALITY", 85)))
 
 # =============================================================================
 # DISPLAY COLOR SCHEME

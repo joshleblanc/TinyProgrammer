@@ -24,7 +24,6 @@ AVAILABLE_MODELS = {
     "anthropic/claude-3.5-haiku": ("Claude 3.5 Haiku", "Haiku 3.5"),
     "google/gemini-3-flash-preview": ("Gemini 3 Flash", "Flash"),
     "openai/gpt-4.1-mini": ("GPT-4.1 Mini", "GPT-4.1"),
-    "x-ai/grok-code-fast-1": ("Grok Code Fast", "Grok"),
     "deepseek/deepseek-v3.2": ("DeepSeek V3.2", "DeepSeek"),
     # Cloud models (MiniMax) - require MINIMAX_API_KEY
     "minimax/MiniMax-M3": ("MiniMax M3", "M3"),
@@ -47,6 +46,31 @@ SURPRISE_ME_LOCAL = "surprise_me_local"
 # Default model
 DEFAULT_MODEL = "surprise_me"
 
+SHORT_PYTHON_OUTPUT_RULES = (
+    "OUTPUT RAW PYTHON ONLY.\n"
+    "No markdown fences, no language tag, no prose before or after code.\n"
+    "Python # comments are OK.\n"
+)
+
+LONG_PYTHON_OUTPUT_RULES = (
+    "FINAL OUTPUT RULES:\n"
+    "- Return raw Python source only.\n"
+    "- Start with the first line of Python code.\n"
+    "- Do not narrate outside the code.\n"
+    "- Do not write prose before or after the code.\n"
+    "- You may include short Python comments using #.\n"
+    "- Do not use markdown fences.\n"
+    "- Do not write python as a language tag.\n"
+    "- Do not add any non-Python text.\n"
+)
+
+
+def _python_output_rules(model_name: str) -> str:
+    """Return concise output rules for local models, detailed ones otherwise."""
+    if model_name.startswith("ollama/"):
+        return SHORT_PYTHON_OUTPUT_RULES
+    return LONG_PYTHON_OUTPUT_RULES
+
 
 def detect_ollama_models(endpoint=None):
     """
@@ -66,6 +90,47 @@ def detect_ollama_models(endpoint=None):
     except (requests.RequestException, ValueError):
         pass
     return (False, [])
+
+
+def _ensure_show_calls(code: str) -> str:
+    """Inject c.show() before each c.sleep(...) that doesn't already have it.
+
+    Liked programs archived before the CMD:FLIP convention don't call
+    c.show(). Passed verbatim into a variation prompt, the LLM tends to
+    mimic the missing call. Normalize the example so it follows the
+    current API.
+    """
+    lines = code.split("\n")
+    result = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("c.sleep("):
+            prev_idx = i - 1
+            while prev_idx >= 0 and not lines[prev_idx].strip():
+                prev_idx -= 1
+            prev_stripped = lines[prev_idx].strip() if prev_idx >= 0 else ""
+            if prev_stripped != "c.show()":
+                indent = line[:len(line) - len(line.lstrip())]
+                result.append(f"{indent}c.show()")
+        result.append(line)
+    return "\n".join(result)
+
+
+def _canvas_frame_budget() -> tuple[float, str, int]:
+    target_fps = float(getattr(config, "CANVAS_TARGET_FPS", 15) or 15)
+    target_fps = max(1.0, min(60.0, target_fps))
+    sleep_seconds = 1.0 / target_fps
+    max_draw_calls = int(getattr(config, "CANVAS_MAX_DRAW_CALLS", 150) or 150)
+    max_draw_calls = max(10, max_draw_calls)
+    return target_fps, f"{sleep_seconds:.3f}", max_draw_calls
+
+
+def _canvas_budget_rules() -> str:
+    target_fps, sleep_seconds, max_draw_calls = _canvas_frame_budget()
+    return (
+        f"- Aim for about {target_fps:g} FPS: call c.show() then c.sleep({sleep_seconds}) at end of each frame\n"
+        f"- Keep each frame under about {max_draw_calls} draw calls; prefer moving fewer simple shapes over redrawing huge grids\n"
+    )
 
 
 class LLMGenerator:
@@ -416,6 +481,7 @@ class LLMGenerator:
         # Get canvas dimensions from config
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
+        budget_rules = _canvas_budget_rules()
 
         # Creative direction from dimensions dict
         creative_block = ""
@@ -443,7 +509,7 @@ class LLMGenerator:
             "- Start with variables, then while True loop\n"
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n"
             "- RGB values are integers 0-255 (NOT floats 0.0-1.0)\n"
-            "- Use simple shapes, avoid too many draw calls per frame\n"
+            f"{budget_rules}"
             "- Add short casual comments like a human thinking out loud\n"
             "  e.g. '# hmm let's try a spiral', '# this should bounce nicely'\n\n"
             "ONLY these methods exist on 'c':\n"
@@ -454,9 +520,10 @@ class LLMGenerator:
             "  c.fill_rect(x,y,w,h,r,g,b)\n"
             "  c.circle(x,y,radius,r,g,b)\n"
             "  c.fill_circle(x,y,radius,r,g,b)\n"
+            "  c.show()\n"
             "  c.sleep(seconds)\n"
             "Do NOT use any other methods.\n\n"
-            "Output ONLY Python code. No markdown, no explanation.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
 
         return prompt
@@ -470,6 +537,7 @@ class LLMGenerator:
         description = _resolve_description(program_type)
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
+        budget_rules = _canvas_budget_rules()
 
         palette = ""
         if creative and creative.get("palette"):
@@ -480,17 +548,20 @@ class LLMGenerator:
             f"{palette}\n"
             "RULES:\n"
             "- 20-50 lines of code, no imports\n"
-            "- while True loop\n"
+            "- Start with variables, then while True loop\n"
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n\n"
-            "Methods on 'c': clear, pixel, line, rect, fill_rect, circle, fill_circle, sleep\n"
-            "All take r,g,b after coordinates.\n\n"
-            "Output ONLY Python code.\n"
+            f"{budget_rules}\n"
+            "Methods on 'c': clear, pixel, line, rect, fill_rect, circle, fill_circle, show, sleep\n"
+            "All draw methods take r,g,b after coordinates. c.show() takes no args.\n\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
     def _build_wireframe_prompt(self, lessons: str = "") -> str:
         """Special prompt for wireframe_plot — uses the Plot3D helper."""
         lessons_text = f"Remember: {lessons}\n\n" if lessons else ""
+        _, _, max_draw_calls = _canvas_frame_budget()
+        grid_max = max(10, min(18, int((max_draw_calls / 2) ** 0.5) + 8))
 
         prompt = (
             f"{lessons_text}"
@@ -499,7 +570,7 @@ class LLMGenerator:
             "p and call p.run(func) at the end.\n\n"
             "Plot3D API (the only methods you need):\n"
             "  p.set_range(x=(min,max), y=(min,max))    # default (-5, 5)\n"
-            "  p.set_grid(steps=20)                       # 10-30 recommended\n"
+            f"  p.set_grid(steps={grid_max})                       # 10-{grid_max} recommended on small displays\n"
             "  p.set_rotation_speed(1.5)                  # degrees per frame\n"
             "  p.run(func)                                # func(x, y) -> z, starts loop\n\n"
             "Write a surface function that's visually interesting. Not just sin(x+y).\n"
@@ -516,7 +587,7 @@ class LLMGenerator:
             "  def surface(x, y):\n"
             "      return math.sin(math.sqrt(x*x + y*y))\n"
             "  p.run(surface)\n\n"
-            "Output ONLY Python code. No markdown, no explanation.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
@@ -524,6 +595,8 @@ class LLMGenerator:
         """Build a prompt asking the LLM to create a small variation of a liked program."""
         canvas_w = config.CANVAS_DRAW_W
         canvas_h = config.CANVAS_DRAW_H
+        code = _ensure_show_calls(code)
+        budget_rules = _canvas_budget_rules()
 
         prompt = (
             "Here's a Python program the user enjoyed:\n\n"
@@ -540,7 +613,7 @@ class LLMGenerator:
             "- Start with variables, then while True loop\n"
             f"- Canvas: {canvas_w}x{canvas_h} pixels\n"
             "- RGB values are integers 0-255 (NOT floats 0.0-1.0)\n"
-            "- Use simple shapes, avoid too many draw calls per frame\n\n"
+            f"{budget_rules}\n"
             "ONLY these methods exist on 'c':\n"
             "  c.clear(r,g,b)\n"
             "  c.pixel(x,y,r,g,b)\n"
@@ -549,9 +622,10 @@ class LLMGenerator:
             "  c.fill_rect(x,y,w,h,r,g,b)\n"
             "  c.circle(x,y,radius,r,g,b)\n"
             "  c.fill_circle(x,y,radius,r,g,b)\n"
+            "  c.show()\n"
             "  c.sleep(seconds)\n"
             "Do NOT use any other methods.\n\n"
-            "Output ONLY Python code. No markdown, no explanation.\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 
@@ -596,10 +670,10 @@ class LLMGenerator:
             f"{code}\n\n"
             f"Error: {error}\n\n"
             "FIX IT. Write ONLY the fixed code.\n"
-            "NO explanations. NO markdown.\n"
             "Constraints:\n"
             "- Keep it simple.\n"
-            "- Use 'c' for drawing.\n"
+            "- Use 'c' for drawing.\n\n"
+            f"{_python_output_rules(self.model_name)}"
         )
         return prompt
 

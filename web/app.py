@@ -23,6 +23,30 @@ import config
 # Global reference to brain (set by main.py)
 _brain = None
 
+STREAM_SCALE_OPTIONS = [
+    (1.0, "Full size"),
+    (0.75, "75%"),
+    (0.5, "50%"),
+    (0.25, "25%"),
+]
+STREAM_SCALE_VALUES = {value for value, _label in STREAM_SCALE_OPTIONS}
+
+
+def _bounded_int(value, default, minimum, maximum):
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _bounded_float(value, default, minimum, maximum):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
 
 def set_brain(brain):
     """Set the brain instance for status access."""
@@ -40,6 +64,7 @@ def create_app():
 
     # Initialize config manager
     config_mgr = ConfigManager()
+    app.config["VERSION"] = config_mgr.get("VERSION", "?")
 
     # =========================================================================
     # Routes
@@ -99,6 +124,17 @@ def create_app():
             return jsonify({"success": True, "screensaver": "off"})
         return jsonify({"error": "Brain not initialized"})
 
+    @app.route('/api/reroll-name', methods=['POST'])
+    def api_reroll_name():
+        """Reroll the device's BBS display name."""
+        if not _brain or not getattr(_brain, 'bbs_client', None):
+            return jsonify({"error": "BBS not available"}), 400
+        result = _brain.bbs_client.reroll_name()
+        if "error" in result:
+            status = 429 if "Cooldown" in result.get("error", "") else 500
+            return jsonify(result), status
+        return jsonify(result)
+
     @app.route('/api/like', methods=['POST'])
     def api_like():
         """Like the current program for future remixing."""
@@ -120,7 +156,7 @@ def create_app():
             import pygame
             from datetime import datetime
 
-            surface = _brain.terminal.screen
+            surface = _brain.terminal.get_screen_snapshot()
             if surface is None:
                 return jsonify({"error": "No display surface available"}), 503
 
@@ -138,6 +174,79 @@ def create_app():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    @app.route('/api/record-gif', methods=['POST'])
+    def api_record_gif():
+        """Capture a 5-second animated GIF of the live display surface."""
+        if not _brain or not hasattr(_brain, 'terminal'):
+            return jsonify({"error": "Brain not initialized"}), 503
+
+        if _brain.terminal.screen is None:
+            return jsonify({"error": "No display surface available"}), 503
+
+        try:
+            import io
+            import pygame
+            import numpy as np
+            from PIL import Image
+            from datetime import datetime
+
+            DURATION_SECONDS = 5.0
+            TARGET_FPS = 10
+            INTERVAL = 1.0 / TARGET_FPS
+
+            frames = []
+            timestamps = []
+            next_capture = time.monotonic()
+            end_time = next_capture + DURATION_SECONDS
+
+            while time.monotonic() < end_time:
+                now = time.monotonic()
+                if now >= next_capture:
+                    snapshot = _brain.terminal.get_screen_snapshot()
+                    if snapshot is None:
+                        break
+                    arr = pygame.surfarray.array3d(snapshot).transpose(1, 0, 2)
+                    img = Image.fromarray(arr.astype("uint8"), "RGB").convert(
+                        "P", palette=Image.ADAPTIVE, colors=256
+                    )
+                    frames.append(img)
+                    timestamps.append(now)
+                    next_capture += INTERVAL
+                else:
+                    time.sleep(min(0.01, next_capture - now))
+
+            if not frames:
+                return jsonify({"error": "No frames captured"}), 500
+
+            # Per-frame duration from real intervals so playback matches
+            # wall-clock time. Pi Zero often captures slower than TARGET_FPS,
+            # which would otherwise make the GIF play back too fast.
+            durations = []
+            for i in range(len(timestamps) - 1):
+                gap_ms = int((timestamps[i + 1] - timestamps[i]) * 1000)
+                durations.append(max(20, gap_ms))
+            durations.append(durations[-1] if durations else int(INTERVAL * 1000))
+
+            buf = io.BytesIO()
+            frames[0].save(
+                buf, format="GIF",
+                save_all=True,
+                append_images=frames[1:],
+                duration=durations,
+                loop=0,
+                optimize=True,
+            )
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"tinyprogrammer_{timestamp}.gif"
+            return Response(
+                buf.getvalue(),
+                mimetype="image/gif",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route('/stream')
     def video_stream():
         """MJPEG stream of the live display surface (Docker/desktop only)."""
@@ -145,29 +254,40 @@ def create_app():
         if not config.WEB_STREAM_ENABLED:
             return "Stream not enabled. Set WEB_STREAM_ENABLED=true to activate.", 404
 
-        from display.frame_stream import get_frame
+        from display.frame_stream import placeholder_frame, register_client, unregister_client, wait_for_frame
+
+        def mjpeg_part(frame):
+            return (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+            )
 
         def generate():
-            while True:
-                frame = get_frame()
-                if frame:
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-                    )
-                time.sleep(0.05)  # ~20fps cap for the stream
+            sequence = 0
+            register_client()
+            try:
+                frame, sequence = wait_for_frame(sequence, timeout=0)
+                yield mjpeg_part(frame or placeholder_frame())
+
+                while True:
+                    frame, sequence = wait_for_frame(sequence, timeout=1.0)
+                    yield mjpeg_part(frame or placeholder_frame())
+            finally:
+                unregister_client()
 
         return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
     @app.route('/settings', methods=['GET', 'POST'])
     def settings():
         """Settings page - view and edit configuration."""
+        import config as _config
         from llm.generator import AVAILABLE_MODELS, DEFAULT_MODEL, SURPRISE_ME, SURPRISE_ME_LOCAL
 
         message = None
         if request.method == 'POST':
             # Collect form data
             updates = {}
+            previous_chrome_backend = config_mgr.get('DISPLAY_CHROME_BACKEND', 'asset')
 
             # LLM model selection (OpenRouter)
             selected_model = request.form.get('llm_model', DEFAULT_MODEL)
@@ -194,11 +314,42 @@ def create_app():
             updates['TYPO_PROBABILITY'] = float(request.form.get('typo_probability', 0.02))
             updates['PAUSE_PROBABILITY'] = float(request.form.get('pause_probability', 0.05))
 
+            updates['TYPING_SKIP_INDENT'] = 'typing_skip_indent' in request.form
+
             # Program types live on the /prompt page now; see prompt_editor().
+
+            # Interface theme
+            interface_theme = _config.normalize_display_chrome_backend(
+                request.form.get('interface_theme', 'asset')
+            )
+            updates['DISPLAY_CHROME_BACKEND'] = interface_theme
 
             # Color scheme (display adjustment layer)
             color_scheme = request.form.get('color_scheme', 'none')
             updates['COLOR_SCHEME'] = color_scheme
+
+            # Dashboard live preview stream tuning
+            updates['WEB_STREAM_FPS'] = _bounded_int(
+                request.form.get('web_stream_fps', 1),
+                default=1,
+                minimum=1,
+                maximum=30,
+            )
+            stream_scale = _bounded_float(
+                request.form.get('web_stream_scale', 1.0),
+                default=1.0,
+                minimum=0.1,
+                maximum=1.0,
+            )
+            updates['WEB_STREAM_SCALE'] = (
+                stream_scale if stream_scale in STREAM_SCALE_VALUES else 1.0
+            )
+            updates['WEB_STREAM_JPEG_QUALITY'] = _bounded_int(
+                request.form.get('web_stream_jpeg_quality', 85),
+                default=85,
+                minimum=20,
+                maximum=95,
+            )
 
             # BBS settings
             updates['BBS_ENABLED'] = 'bbs_enabled' in request.form
@@ -207,6 +358,12 @@ def create_app():
             updates['BBS_BREAK_DURATION_MAX'] = int(request.form.get('bbs_break_duration_max', 300))
             updates['BBS_DISPLAY_COLOR'] = request.form.get('bbs_display_color', 'green')
             updates['BBS_DEVICE_NAME'] = request.form.get('bbs_device_name', 'TinyProgrammer')
+
+            # Reminisce settings
+            updates['REMINISCE_ENABLED'] = 'reminisce_enabled' in request.form
+            updates['REMINISCE_ENTRY_PROBABILITY'] = float(request.form.get('reminisce_entry_probability', 0.7))
+            updates['REMINISCE_LOOP_PROBABILITY'] = float(request.form.get('reminisce_loop_probability', 0.50))
+            updates['REMINISCE_INTRO_PAUSE_SECONDS'] = float(request.form.get('reminisce_intro_pause_seconds', 3.0))
 
             # Schedule settings
             updates['SCHEDULE_ENABLED'] = 'schedule_enabled' in request.form
@@ -221,7 +378,16 @@ def create_app():
                 pass  # Framebuffer not available (e.g., on dev machine)
 
             config_mgr.save_overrides(updates)
-            message = "Settings saved! Changes will apply on next program cycle."
+            if interface_theme != previous_chrome_backend:
+                message = (
+                    "Settings saved! Interface theme changes require restarting "
+                    "TinyProgrammer; stream and color changes apply immediately."
+                )
+            else:
+                message = (
+                    "Settings saved! Stream and color changes apply immediately; "
+                    "other changes will apply on next program cycle."
+                )
 
         # Load current config
         current = config_mgr.get_all()
@@ -248,7 +414,9 @@ def create_app():
                              message=message,
                              available_models=models_for_template,
                              current_model=current_model,
-                             color_schemes=color_schemes)
+                             interface_themes=_config.DISPLAY_CHROME_CHOICES,
+                             color_schemes=color_schemes,
+                             stream_scale_options=STREAM_SCALE_OPTIONS)
 
     @app.route('/logs')
     def logs():

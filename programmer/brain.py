@@ -2,7 +2,9 @@
 Brain - Main State Machine
 
 Controls the overall behavior loop:
-THINK → WRITE → RUN → WATCH → ARCHIVE → repeat
+THINK → WRITE → REVIEW → RUN → WATCH → ARCHIVE → REFLECT → repeat
+
+Optional BBS breaks can lead into REMINISCE, which replays archived creations.
 """
 
 import os
@@ -21,8 +23,15 @@ from display.terminal import Terminal
 from llm.generator import LLMGenerator
 from programmer.personality import Personality
 from programmer import creativity
+from programmer.code_typing import CodeTypingRenderer
+from programmer.error_log import log_error
 from programmer.liked_store import LikedStore
-from archive.repository import Repository
+from programmer.reminiscence import Reminiscence
+from archive.repository import (
+    CANVAS_PROTOCOL_BATCHED,
+    CANVAS_PROTOCOL_LEGACY,
+    Repository,
+)
 from archive.learning import LearningSystem
 import config
 from collections import deque
@@ -41,6 +50,7 @@ class State(Enum):
     ARCHIVE = auto()
     REFLECT = auto()
     BBS_BREAK = auto()
+    REMINISCE = auto()
     ERROR = auto()
 
 
@@ -53,6 +63,18 @@ class Program:
     timestamp: float
     success: bool = False
     error_message: Optional[str] = None
+    canvas_protocol: str = CANVAS_PROTOCOL_LEGACY
+
+
+def _typing_delay_range() -> tuple[float, float]:
+    """Return per-character delay bounds from live chars/sec config."""
+    min_cps = float(getattr(config, "TYPING_SPEED_MIN", 2) or 2)
+    max_cps = float(getattr(config, "TYPING_SPEED_MAX", 8) or 8)
+    min_cps = max(0.1, min_cps)
+    max_cps = max(0.1, max_cps)
+    if min_cps > max_cps:
+        min_cps, max_cps = max_cps, min_cps
+    return 1.0 / max_cps, 1.0 / min_cps
 
 
 class Brain:
@@ -99,6 +121,7 @@ class Brain:
         self._session_history = []  # resets each restart
         self.current_process = None
         self._force_screensaver = False
+        self.reminiscence = Reminiscence()
         self.liked_store = LikedStore()
         # Circular log buffer for web UI
         self._log_buffer = deque(maxlen=500)
@@ -209,6 +232,8 @@ class Brain:
                     self._do_reflect()
                 elif self.state == State.BBS_BREAK:
                     self._do_bbs_break()
+                elif self.state == State.REMINISCE:
+                    self._do_reminisce()
                 elif self.state == State.ERROR:
                     self._do_error()
                 
@@ -232,6 +257,142 @@ class Brain:
         self._update_sidebar()
         time.sleep(config.STATE_TRANSITION_DELAY)
         self.state = new_state
+
+    def _program_environment(self, canvas_batch: bool = True) -> dict:
+        """Build the restricted subprocess environment for canvas programs."""
+        python_paths = [self.archive.local_path]
+        existing_pythonpath = os.environ.get("PYTHONPATH", "")
+        if existing_pythonpath:
+            python_paths.append(existing_pythonpath)
+        return {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "PYTHONPATH": os.pathsep.join(python_paths),
+            "TINY_CANVAS_W": str(self.terminal.canvas_size[0]),
+            "TINY_CANVAS_H": str(self.terminal.canvas_size[1]),
+            "TINY_CANVAS_BATCH": "1" if canvas_batch else "0",
+        }
+
+    def _start_program_process(self, filepath: str, canvas_batch: bool = True):
+        """Start a canvas program with unbuffered output."""
+        return subprocess.Popen(
+            [sys.executable, "-u", filepath],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1,
+            env=self._program_environment(canvas_batch=canvas_batch),
+        )
+
+    def _watch_running_process(self, status: str, mood: str,
+                               early_finish_message: str):
+        """Display output from the current process for the WATCH duration.
+
+        Reads stdout as a stream and ticks the terminal on `CMD:FLIP` markers
+        emitted by `tiny_canvas.show()`. Programs that never call `show()`
+        still render via a periodic fallback tick.
+        """
+        self.terminal.set_status(status, mood)
+
+        start_time = time.time()
+        duration = random.randint(config.WATCH_DURATION_MIN, config.WATCH_DURATION_MAX)
+        print(f"[Brain] Watch duration: {duration}s (range: {config.WATCH_DURATION_MIN}-{config.WATCH_DURATION_MAX})")
+
+        last_output = ""
+        stop_reason = "timeout"
+        output_buffer = ""
+        last_tick = time.monotonic()
+        last_flip = 0.0
+        saw_flip = False
+        FALLBACK_TICK_SECONDS = 0.05
+        # Suppress fallback ticks while the program is actively emitting FLIP.
+        # If no FLIP for FLIP_GRACE_SECONDS, assume program isn't using show()
+        # and fall back to periodic ticks so the screen stays alive.
+        FLIP_GRACE_SECONDS = 1.0
+        READ_CHUNK_SIZE = 4096
+
+        def fallback_due(now: float) -> bool:
+            if (now - last_tick) < FALLBACK_TICK_SECONDS:
+                return False
+            return (now - last_flip) >= FLIP_GRACE_SECONDS
+
+        while time.time() - start_time < duration:
+            if self._restart_requested or self._force_screensaver:
+                if self._restart_requested:
+                    self._restart_requested = False
+                    stop_reason = "restart"
+                    self.terminal.type_string("\n# Restart requested!\n")
+                else:
+                    stop_reason = "screensaver"
+                if self.current_process.poll() is None:
+                    self.current_process.terminate()
+                break
+
+            if self.current_process.poll() is not None:
+                stop_reason = "exited"
+                self.terminal.type_string(early_finish_message)
+                break
+
+            try:
+                ready, _, _ = select.select(
+                    [self.current_process.stdout], [], [], FALLBACK_TICK_SECONDS)
+                if ready:
+                    # Read directly from the fd so TextIOWrapper buffering
+                    # does not hide bytes from the next select() call.
+                    chunk = os.read(
+                        self.current_process.stdout.fileno(), READ_CHUNK_SIZE)
+                    if chunk:
+                        output_buffer += chunk.decode(errors="replace")
+            except Exception:
+                pass
+
+            while "\n" in output_buffer:
+                line, output_buffer = output_buffer.split("\n", 1)
+                stripped = line.strip()
+
+                if stripped == "CMD:FLIP":
+                    now = time.monotonic()
+                    saw_flip = True
+                    self.terminal.tick()
+                    last_tick = now
+                    last_flip = now
+                    continue
+
+                if stripped.startswith("CMDS:"):
+                    try:
+                        commands = json.loads(stripped[5:])
+                        if isinstance(commands, list):
+                            self.terminal.process_draw_commands(commands)
+                    except Exception:
+                        pass
+                    last_output = line + "\n"
+                    continue
+
+                if stripped.startswith("CMD:"):
+                    self.terminal.process_draw_command(line + "\n")
+                else:
+                    self.terminal.type_string(line + "\n")
+                last_output = line + "\n"
+
+                now = time.monotonic()
+                if fallback_due(now):
+                    self.terminal.tick()
+                    last_tick = now
+
+            now = time.monotonic()
+            if fallback_due(now):
+                self.terminal.tick()
+                last_tick = now
+
+        self.terminal.hide_canvas()
+        exit_code = self.current_process.poll()
+        if exit_code is None:
+            self.current_process.terminate()
+            try:
+                self.current_process.wait(timeout=1.0)
+            except Exception:
+                self.current_process.kill()
+        return exit_code, last_output, stop_reason, saw_flip
     
     def _do_boot(self):
         """
@@ -356,9 +517,13 @@ class Brain:
         self.terminal.set_status("WRITING", self.personality.get_mood_status())
         self.terminal.clear()
 
-        # Start with the header
+        code_typing = CodeTypingRenderer(
+            self.terminal,
+            skip_indent=getattr(config, "TYPING_SKIP_INDENT", False),
+            delay_range=_typing_delay_range(),
+        )
         header = self.llm.get_header(self.current_program.program_type if self.current_program else "")
-        self.terminal.type_string(header)
+        code_typing.type_text(header)
         full_code = header
 
         in_code_block = False
@@ -409,11 +574,8 @@ class Brain:
 
                         if not should_skip:
                             # Output the line
-                            for c in current_line:
-                                self.terminal.type_char(c)
-                                full_code += c
-                                time.sleep(random.uniform(0.02, 0.08))
-                                self.terminal.tick()
+                            code_typing.type_text(current_line)
+                            full_code += current_line
                         else:
                             print(f"[Brain] Skipping duplicate: {line_stripped}")
 
@@ -424,7 +586,8 @@ class Brain:
 
         except Exception as e:
             print(f"[Brain] LLM Error: {e}")
-            self.terminal.type_string(f"\n// Error: {e}\n")
+            code_typing.finish()
+            self.terminal.type_string(f"\n# Error: {e}\n")
             self.current_program.success = False
             self.current_program.error_message = str(e)
             self._transition(State.ERROR)
@@ -432,12 +595,13 @@ class Brain:
 
         # Output any remaining buffered content
         if current_line:
-            for c in current_line:
-                self.terminal.type_char(c)
-                full_code += c
+            code_typing.type_text(current_line)
+            full_code += current_line
+
+        code_typing.finish()
 
         self.current_program.code = full_code
-        self.terminal.type_string("\n\n// finished.\n")
+        self.terminal.type_string("\n\n# finished.\n")
         time.sleep(0.5)
         self._transition(State.REVIEW)
     
@@ -446,7 +610,7 @@ class Brain:
         Review state: check code for obvious errors.
         """
         self.terminal.set_status("REVIEWING", "careful")
-        self.terminal.type_string("\n// checking my work...\n")
+        self.terminal.type_string("\n# checking my work...\n")
         time.sleep(1)
         
         # Clean the code (same as in _do_run)
@@ -465,31 +629,33 @@ class Brain:
         for lib in banned:
             if f"import {lib}" in code or f"from {lib}" in code:
                 msg = f"Forbidden library usage: {lib}"
-                self.terminal.type_string(f"// oops, I used {lib}!\n")
+                log_error(self.current_program.program_type, "review", msg)
+                self.terminal.type_string(f"# oops, I used {lib}!\n")
                 if self.fix_attempts < 2:
                     self.current_program.error_message = msg
                     self._transition(State.FIX)
                     return
                 else:
-                    self.terminal.type_string("// ignoring it...\n")
+                    self.terminal.type_string("# ignoring it...\n")
 
         # 2. Check syntax
         try:
             compile(code, "<string>", "exec")
         except SyntaxError as e:
             msg = f"SyntaxError: {e.msg} at line {e.lineno}"
-            self.terminal.type_string(f"// syntax error found!\n")
+            log_error(self.current_program.program_type, "review", msg)
+            self.terminal.type_string(f"# syntax error found!\n")
             if self.fix_attempts < 2:
                 self.current_program.error_message = msg
                 self._transition(State.FIX)
                 return
             else:
-                self.terminal.type_string("// still broken, giving up.\n")
+                self.terminal.type_string("# still broken, giving up.\n")
                 self.current_program.success = False
                 self._transition(State.ARCHIVE)
                 return
             
-        self.terminal.type_string("// looks good!\n")
+        self.terminal.type_string("# looks good!\n")
         time.sleep(0.5)
         self._transition(State.RUN)
     
@@ -516,7 +682,7 @@ class Brain:
         
         # Save cleaned code to temp file for execution
         filename = "temp_execution.py"
-        programs_dir = "programs"
+        programs_dir = self.archive.local_path
         if not os.path.exists(programs_dir):
             os.makedirs(programs_dir)
             
@@ -525,25 +691,7 @@ class Brain:
             f.write(code)
             
         try:
-            # Minimal environment for the subprocess — only what generated
-            # programs need. Avoids leaking API keys and other secrets.
-            env = {
-                "PATH": os.environ.get("PATH", ""),
-                "HOME": os.environ.get("HOME", ""),
-                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-                "TINY_CANVAS_W": str(config.CANVAS_DRAW_W),
-                "TINY_CANVAS_H": str(config.CANVAS_DRAW_H),
-            }
-
-            # Run with python -u (unbuffered) so we can see output immediately
-            self.current_process = subprocess.Popen(
-                [sys.executable, "-u", filepath],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1,  # Line buffered
-                env=env,
-            )
+            self.current_process = self._start_program_process(filepath)
             
             self.current_program.success = True
             self._transition(State.WATCH)
@@ -560,59 +708,16 @@ class Brain:
         
         Let the program run for a while, display its output.
         """
-        self.terminal.set_status("WATCHING", "proud")
-
-        start_time = time.time()
-        duration = random.randint(config.WATCH_DURATION_MIN, config.WATCH_DURATION_MAX)
-        print(f"[Brain] Watch duration: {duration}s (range: {config.WATCH_DURATION_MIN}-{config.WATCH_DURATION_MAX})")
-        self.log(f"Watching program for {duration}s")
-
-        last_output = ""
-        
-        while time.time() - start_time < duration:
-            # Check for restart or screensaver request
-            if self._restart_requested or self._force_screensaver:
-                if self._restart_requested:
-                    self._restart_requested = False
-                    self.terminal.type_string("\n// Restart requested!\n")
-                if self.current_process.poll() is None:
-                    self.current_process.terminate()
-                break
-
-            # Check if process finished
-            if self.current_process.poll() is not None:
-                self.terminal.type_string("\n// Program finished early.\n")
-                break
-
-            # Non-blocking read so timeout always works
-            try:
-                ready, _, _ = select.select(
-                    [self.current_process.stdout], [], [], 0.1)
-                if ready:
-                    line = self.current_process.stdout.readline()
-                    if line:
-                        if line.startswith("CMD:"):
-                            self.terminal.process_draw_command(line)
-                        else:
-                            self.terminal.type_string(line)
-                        last_output = line
-            except Exception:
-                pass
-
-            # Flush display to show drawing updates
-            self.terminal.tick()
-        
-        # Hide canvas popup
-        self.terminal.hide_canvas()
-
-        # Cleanup process
-        exit_code = self.current_process.poll()
+        exit_code, last_output, _, saw_flip = self._watch_running_process(
+            "WATCHING",
+            self.personality.get_mood_status(),
+            "\n# Program finished early.\n",
+        )
+        if self.current_program:
+            self.current_program.canvas_protocol = (
+                CANVAS_PROTOCOL_BATCHED if saw_flip else CANVAS_PROTOCOL_LEGACY
+            )
         if exit_code is None:
-            self.current_process.terminate()
-            try:
-                self.current_process.wait(timeout=1.0)
-            except Exception:
-                self.current_process.kill()
             self.current_program.success = True
             self._transition(State.ARCHIVE)
         else:
@@ -623,7 +728,8 @@ class Brain:
                 error_msg = (last_output + "\n" + remaining).strip()
                 if not error_msg:
                     error_msg = f"Process exited with code {exit_code}"
-                
+                log_error(self.current_program.program_type, "runtime", error_msg)
+
                 if self.fix_attempts < 2:
                     self.current_program.error_message = error_msg
                     self._transition(State.FIX)
@@ -639,15 +745,20 @@ class Brain:
         """Fix state: try to repair broken code."""
         self.fix_attempts += 1
         self.terminal.set_status("FIXING", "worried")
-        self.terminal.type_string(f"\n// oh no, it broke :(\n")
+        self.terminal.type_string(f"\n# oh no, it broke :(\n")
         time.sleep(1)
-        self.terminal.type_string(f"// trying to fix it (attempt {self.fix_attempts})...\n")
+        self.terminal.type_string(f"# trying to fix it (attempt {self.fix_attempts})...\n")
         time.sleep(1)
         
         prompt = self.llm.build_fix_prompt(self.current_program.code, self.current_program.error_message)
         
         full_code = ""
         in_code_block = False
+        code_typing = CodeTypingRenderer(
+            self.terminal,
+            skip_indent=getattr(config, "TYPING_SKIP_INDENT", False),
+            delay_range=_typing_delay_range(),
+        )
 
         try:
             for token in self.llm.stream(prompt, max_tokens=config.LLM_MAX_TOKENS,
@@ -669,26 +780,25 @@ class Brain:
                 if self._restart_requested or self._force_screensaver:
                     break
 
-                for char in token:
-                    self.terminal.type_char(char)
-                    full_code += char
-                    time.sleep(random.uniform(0.01, 0.05))
-                    self.terminal.tick()
+                code_typing.type_text(token)
+                full_code += token
 
         except Exception as e:
             print(f"[Brain] Fix Error: {e}")
+            code_typing.finish()
             self._transition(State.ERROR)
             return
 
+        code_typing.finish()
         self.current_program.code = full_code
-        self.terminal.type_string("\n\n// fixed?\n")
+        self.terminal.type_string("\n\n# fixed?\n")
         time.sleep(1)
         self._transition(State.REVIEW)
     
     def _do_reflect(self):
         """Reflect on what happened and learn a lesson."""
         self.terminal.set_status("REFLECTING", "wise")
-        self.terminal.type_string("\n// what did I learn?\n")
+        self.terminal.type_string("\n# what did I learn?\n")
         time.sleep(1)
         
         prompt = self.llm.build_reflection_prompt(
@@ -706,16 +816,17 @@ class Brain:
                                             stop=["<|im_end|>"]):
                 # Filter newlines to keep it clean
                 token = token.replace("\n", " ")
-                self.terminal.type_char(token)
                 lesson += token
-                time.sleep(random.uniform(0.01, 0.05))
-                self.terminal.tick()
+                for char in token:
+                    self.terminal.type_char(char)
+                    time.sleep(random.uniform(0.01, 0.05))
+                    self.terminal.tick()
         except Exception:
             pass
             
         if lesson:
             self.learning.add_lesson(lesson)
-            self.terminal.type_string("\n// saved to memory.\n")
+            self.terminal.type_string("\n# saved to memory.\n")
         
         time.sleep(2)
 
@@ -749,9 +860,11 @@ class Brain:
                 mood=self.personality.get_mood_status(),
                 success=self.current_program.success,
                 thought_process=self.current_program.thought_process,
-                error_message=self.current_program.error_message
+                model=self.llm.get_actual_model(),
+                error_message=self.current_program.error_message,
+                canvas_protocol=self.current_program.canvas_protocol,
             )
-            self.terminal.type_string(f"\n// Saved to archive.\n")
+            self.terminal.type_string(f"\n# Saved to archive.\n")
         except Exception as e:
             print(f"[Brain] Archive error: {e}")
             self.log(f"Archive error: {e}", "error")
@@ -779,10 +892,115 @@ class Brain:
         Handle errors gracefully, try to recover.
         """
         self.terminal.set_status("ERROR", "confused")
-        self.terminal.type_string("// something went wrong...\n")
+        self.terminal.type_string("# something went wrong...\n")
         time.sleep(2)
         self.personality.update_mood(False)
         self._transition(State.THINK)
+
+    # =========================================================================
+    # Reminisce
+    # =========================================================================
+
+    def _next_state_after_bbs(self, completed: bool) -> State:
+        """Choose the state after a BBS break."""
+        self.reminiscence.clear()
+
+        if not completed or not getattr(config, "REMINISCE_ENABLED", False):
+            return State.THINK
+
+        candidates = self.archive.get_replay_candidates()
+        if not candidates:
+            print("[Brain] Reminisce skipped: no replay candidates")
+            return State.THINK
+
+        chance = getattr(config, "REMINISCE_ENTRY_PROBABILITY", 0.7)
+        if random.random() >= chance:
+            return State.THINK
+
+        return State.REMINISCE
+
+    def _type_reminisce_intro(self, metadata):
+        """Type a short tender-machine transition before replaying an archive."""
+        mood = metadata.mood or "quiet"
+        self.terminal.set_status("REMINISCING", mood)
+        self.terminal.type_string("\n")
+        for line in self.reminiscence.intro_lines(metadata):
+            self.terminal.type_string(line)
+            time.sleep(random.uniform(0.4, 0.9))
+            self.terminal.tick()
+
+    def _pause_after_reminisce_intro(self):
+        """Hold the REMINISCE intro briefly before opening the archived canvas."""
+        pause_seconds = max(0, getattr(config, "REMINISCE_INTRO_PAUSE_SECONDS", 3.0))
+        deadline = time.time() + pause_seconds
+        while time.time() < deadline:
+            time.sleep(min(0.1, deadline - time.time()))
+            self.terminal.tick()
+
+    def _after_reminisce(self):
+        """Either continue a REMINISCE sequence or return to THINK."""
+        if not getattr(config, "REMINISCE_ENABLED", False):
+            self.reminiscence.clear()
+            self._transition(State.THINK)
+            return
+
+        candidates = self.archive.get_replay_candidates()
+        chance = getattr(config, "REMINISCE_LOOP_PROBABILITY", 0.50)
+        if self.reminiscence.has_unseen(candidates) and random.random() < chance:
+            self._transition(State.REMINISCE)
+            return
+
+        self.reminiscence.clear()
+        self._transition(State.THINK)
+
+    def _do_reminisce(self):
+        """Replay one archived creation as a memory after a BBS session."""
+        metadata = self.reminiscence.choose(self.archive.get_replay_candidates())
+        if not metadata:
+            print("[Brain] Reminisce complete: no unseen replay candidates")
+            self.reminiscence.clear()
+            self._transition(State.THINK)
+            return
+
+        self._type_reminisce_intro(metadata)
+        self._pause_after_reminisce_intro()
+
+        filepath = self.archive.get_program_path(metadata)
+        self.terminal.show_canvas()
+        try:
+            canvas_batch = (
+                getattr(metadata, "canvas_protocol", CANVAS_PROTOCOL_LEGACY)
+                == CANVAS_PROTOCOL_BATCHED
+            )
+            self.current_process = self._start_program_process(
+                filepath,
+                canvas_batch=canvas_batch,
+            )
+        except Exception as e:
+            self.terminal.hide_canvas()
+            print(f"[Brain] Reminisce start failed for {metadata.filename}: {e}")
+            self.terminal.type_string(f"\n# the reminisce replay would not open: {e}\n")
+            self._after_reminisce()
+            return
+
+        exit_code, last_output, stop_reason, _ = self._watch_running_process(
+            "REMINISCING",
+            metadata.mood or self.personality.get_mood_status(),
+            "\n# Reminisce replay finished early.\n",
+        )
+        if stop_reason == "restart":
+            self.reminiscence.clear()
+            self._transition(State.THINK)
+            return
+
+        if exit_code not in (None, 0):
+            remaining = self.current_process.stdout.read()
+            error_msg = (last_output + "\n" + remaining).strip()
+            if not error_msg:
+                error_msg = f"Process exited with code {exit_code}"
+            print(f"[Brain] Reminisce replay failed for {metadata.filename}: {error_msg}")
+
+        self._after_reminisce()
 
     # =========================================================================
     # BBS Break
@@ -791,6 +1009,7 @@ class Brain:
     def _do_bbs_break(self):
         """BBS break: device visits the bulletin board."""
         self._bbs_breaks_taken += 1
+        completed = False
         try:
             # Fetch notification before entering BBS mode so it's
             # available when the banner is first rendered.
@@ -830,6 +1049,7 @@ class Brain:
                     self._bbs_code_share()
                 else:
                     self._bbs_flat_board(board)
+            completed = True
 
         except Exception as e:
             print(f"[BBS] Break failed: {e}")
@@ -839,7 +1059,7 @@ class Brain:
                 self.terminal.exit_bbs_mode()
             except Exception:
                 pass
-            self._transition(State.THINK)
+            self._transition(self._next_state_after_bbs(completed))
 
     def _bbs_browse(self):
         """Silently browse 2-3 random boards (read only)."""

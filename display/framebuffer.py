@@ -39,6 +39,24 @@ IS_FRAMEBUFFER_AVAILABLE = os.path.exists(FB_DEVICE)
 FB_ROTATION = int(os.environ.get("FB_ROTATION", "-1"))  # -1 = auto-detect
 
 
+def _read_text(path: str) -> str | None:
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _read_int(path: str) -> int | None:
+    value = _read_text(path)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
 def rgb888_to_rgb565(surface) -> np.ndarray:
     """
     Convert a pygame surface (RGB888) to RGB565 numpy array.
@@ -47,8 +65,8 @@ def rgb888_to_rgb565(surface) -> np.ndarray:
     RGB565 format: RRRRR GGGGGG BBBBB (16 bits)
     """
     import pygame
-    # Get pixel array (RGB888)
-    arr = pygame.surfarray.array3d(surface)  # Shape: (width, height, 3)
+    # pixels3d is a view, avoiding the full RGB888 copy made by array3d().
+    arr = pygame.surfarray.pixels3d(surface)  # Shape: (width, height, 3)
 
     # Extract RGB channels
     r = arr[:, :, 0].astype(np.uint16)
@@ -63,10 +81,28 @@ def rgb888_to_rgb565(surface) -> np.ndarray:
     # R: 8 bits -> 5 bits (shift right 3, then left 11)
     # G: 8 bits -> 6 bits (shift right 2, then left 5)
     # B: 8 bits -> 5 bits (shift right 3)
-    rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+    rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
     # Transpose because pygame uses (x, y) but framebuffer uses (y, x)
-    return rgb565.T.astype(np.uint16)
+    return np.ascontiguousarray(rgb565.T)
+
+
+def rgb888_to_xrgb8888(surface) -> np.ndarray:
+    """Convert a pygame surface to a 32bpp XRGB/ARGB framebuffer array."""
+    import pygame
+    arr = pygame.surfarray.pixels3d(surface)  # Shape: (width, height, 3)
+
+    r = arr[:, :, 0].astype(np.uint32)
+    g = arr[:, :, 1].astype(np.uint32)
+    b = arr[:, :, 2].astype(np.uint32)
+    if _color_scheme != "none":
+        r, g, b = apply_color_adjustment(r, g, b, _color_scheme)
+        r = r.astype(np.uint32, copy=False)
+        g = g.astype(np.uint32, copy=False)
+        b = b.astype(np.uint32, copy=False)
+
+    xrgb = 0xFF000000 | (r << 16) | (g << 8) | b
+    return np.ascontiguousarray(xrgb.T)
 
 
 class FramebufferWriter:
@@ -83,29 +119,46 @@ class FramebufferWriter:
         self.rotation = FB_ROTATION
         self.fb_width = width
         self.fb_height = height
+        self.fb_bpp = 16
+        self.fb_stride = width * 2
+        self.fb_name = ""
+        self._fb = None
 
         if self.enabled:
             # Get actual framebuffer dimensions
             try:
-                size_path = f"/sys/class/graphics/{os.path.basename(self.device)}/virtual_size"
-                if os.path.exists(size_path):
-                    with open(size_path) as f:
-                        self.fb_width, self.fb_height = map(int, f.read().strip().split(','))
+                self._load_capabilities()
 
-                        # Auto-detect rotation if framebuffer is portrait but we render landscape
-                        if self.rotation == -1:
-                            if self.fb_width < self.fb_height and width > height:
-                                # Framebuffer is portrait, we render landscape - need 270° CW (90° CCW) rotation
-                                self.rotation = 3
-                                print(f"[FB] Auto-detected rotation: 270° CW (portrait FB {self.fb_width}x{self.fb_height} -> landscape {width}x{height})")
-                            else:
-                                self.rotation = 0
+                # Auto-detect rotation if framebuffer is portrait but we render landscape
+                if self.rotation == -1:
+                    if self.fb_width < self.fb_height and width > height:
+                        # Framebuffer is portrait, we render landscape - need 270° CW (90° CCW) rotation
+                        self.rotation = 3
+                        print(f"[FB] Auto-detected rotation: 270° CW (portrait FB {self.fb_width}x{self.fb_height} -> landscape {width}x{height})")
+                    else:
+                        self.rotation = 0
 
-                        if self.rotation == 0 and (self.fb_width != width or self.fb_height != height):
-                            print(f"[FB] Warning: Expected {width}x{height}, got {self.fb_width}x{self.fb_height}")
+                if self.rotation == 0 and (self.fb_width != width or self.fb_height != height):
+                    print(f"[FB] Warning: Expected {width}x{height}, got {self.fb_width}x{self.fb_height}")
+
+                if self.fb_bpp not in (16, 32):
+                    print(f"[FB] Warning: optimized writer supports 16bpp RGB565 and 32bpp XRGB8888; framebuffer reports {self.fb_bpp}bpp")
             except Exception as e:
                 print(f"[FB] Could not verify dimensions: {e}")
                 self.rotation = 0 if self.rotation == -1 else self.rotation
+
+    def _load_capabilities(self):
+        fb_base = f"/sys/class/graphics/{os.path.basename(self.device)}"
+
+        size_text = _read_text(os.path.join(fb_base, "virtual_size"))
+        if size_text:
+            self.fb_width, self.fb_height = map(int, size_text.split(','))
+
+        self.fb_bpp = _read_int(os.path.join(fb_base, "bits_per_pixel")) or self.fb_bpp
+        self.fb_stride = _read_int(os.path.join(fb_base, "stride")) or (
+            self.fb_width * max(1, self.fb_bpp // 8)
+        )
+        self.fb_name = _read_text(os.path.join(fb_base, "name")) or ""
 
     def write(self, surface) -> bool:
         """
@@ -117,23 +170,28 @@ class FramebufferWriter:
             return False
 
         try:
-            # Convert to RGB565
-            rgb565 = rgb888_to_rgb565(surface)
+            if self.fb_bpp == 16:
+                frame = rgb888_to_rgb565(surface)
+            elif self.fb_bpp == 32:
+                frame = rgb888_to_xrgb8888(surface)
+            else:
+                print(f"[FB] Write skipped: unsupported framebuffer depth {self.fb_bpp}bpp")
+                return False
 
             # Apply rotation if needed
             if self.rotation == 1:  # 90° CW
-                rgb565 = np.rot90(rgb565, k=-1)  # k=-1 is 90° CW
+                frame = np.rot90(frame, k=-1)  # k=-1 is 90° CW
             elif self.rotation == 2:  # 180°
-                rgb565 = np.rot90(rgb565, k=2)
+                frame = np.rot90(frame, k=2)
             elif self.rotation == 3:  # 270° CW (90° CCW)
-                rgb565 = np.rot90(rgb565, k=1)  # k=1 is 90° CCW
+                frame = np.rot90(frame, k=1)  # k=1 is 90° CCW
 
             # Ensure contiguous array for writing
-            rgb565 = np.ascontiguousarray(rgb565)
+            frame = np.ascontiguousarray(frame)
 
-            # Write to framebuffer
-            with open(self.device, 'r+b') as fb:
-                fb.write(rgb565.tobytes())
+            fb = self._open_fb()
+            fb.seek(0)
+            self._write_array(fb, frame)
 
             return True
         except Exception as e:
@@ -148,17 +206,47 @@ class FramebufferWriter:
             return False
 
         try:
-            # Convert RGB888 to RGB565
-            color = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-            data = np.full((self.height, self.width), color, dtype=np.uint16)
+            if self.fb_bpp == 16:
+                color = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+                dtype = np.uint16
+            elif self.fb_bpp == 32:
+                color = 0xFF000000 | (r << 16) | (g << 8) | b
+                dtype = np.uint32
+            else:
+                print(f"[FB] Clear skipped: unsupported framebuffer depth {self.fb_bpp}bpp")
+                return False
 
-            with open(self.device, 'r+b') as fb:
-                fb.write(data.tobytes())
+            data = np.full((self.fb_height, self.fb_width), color, dtype=dtype)
+
+            fb = self._open_fb()
+            fb.seek(0)
+            self._write_array(fb, data)
 
             return True
         except Exception as e:
             print(f"[FB] Clear error: {e}")
             return False
+
+    def close(self):
+        """Close the framebuffer file descriptor if it is open."""
+        if self._fb:
+            self._fb.close()
+            self._fb = None
+
+    def _open_fb(self):
+        if self._fb is None or self._fb.closed:
+            self._fb = open(self.device, 'r+b', buffering=0)
+        return self._fb
+
+    def _write_array(self, fb, data: np.ndarray):
+        row_bytes = data.shape[1] * data.dtype.itemsize
+        if self.fb_stride == row_bytes:
+            fb.write(memoryview(data))
+            return
+
+        padded = np.zeros((data.shape[0], self.fb_stride), dtype=np.uint8)
+        padded[:, :row_bytes] = data.view(np.uint8).reshape(data.shape[0], row_bytes)
+        fb.write(memoryview(padded))
 
 
 # Singleton instance for easy access

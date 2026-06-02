@@ -14,6 +14,7 @@ Layout (480x320):
 """
 
 import os
+import threading
 import time
 import random
 from typing import Tuple, Optional, Callable, List
@@ -25,6 +26,7 @@ import pygame
 
 import config
 from .framebuffer import get_writer, IS_FRAMEBUFFER_AVAILABLE
+from .chrome import default_chrome_regions
 
 # Initialize pygame with dummy driver
 PYGAME_AVAILABLE = True
@@ -58,20 +60,13 @@ class Terminal:
         self.font = None
         self.mock_mode = False
         self.fb_writer = None
-
-        # Layout regions from config (scaled for display size)
-        self.code_area_x = config.CODE_AREA_X
-        self.code_area_y = config.CODE_AREA_Y
-        self.code_area_w = config.CODE_AREA_W
-        self.code_area_h = config.CODE_AREA_H
-        self.line_num_x = config.LINE_NUM_X
-        self.sidebar_x = config.SIDEBAR_X
-        self.sidebar_y = config.SIDEBAR_Y
-        self.sidebar_w = config.SIDEBAR_W
-        self.sidebar_h = config.SIDEBAR_H
-        self.status_bar_y = config.STATUS_BAR_Y
+        self._chrome_backend = "asset"
+        self._chrome = None
+        self._render_lock = threading.Lock()
+        self._apply_chrome_regions(default_chrome_regions(config))
 
         self._init_display(font_name, font_size)
+        self._init_chrome_backend()
         self.char_width, self.char_height = self._get_char_size()
 
         # Calculate code area dimensions in characters
@@ -190,9 +185,62 @@ class Terminal:
         else:
             self.font_bold = self.font
 
+    def _init_chrome_backend(self):
+        normalize_backend = getattr(config, "normalize_display_chrome_backend", None)
+        requested_backend = getattr(config, "DISPLAY_CHROME_BACKEND", "asset")
+        backend = (
+            normalize_backend(requested_backend)
+            if normalize_backend
+            else str(requested_backend or "asset").strip().lower()
+        )
+
+        if backend == "asset" or self.mock_mode:
+            self._chrome_backend = "asset"
+            return
+
+        try:
+            from .chrome.system6 import System6Chrome
+
+            self._chrome = System6Chrome(self.screen, self.width, self.height)
+            self._chrome_backend = backend
+            self._apply_chrome_regions(self._chrome.regions)
+            print(f"[Terminal] Using experimental {backend} chrome backend")
+        except Exception as e:
+            self._chrome = None
+            self._chrome_backend = "asset"
+            print(f"[Terminal] {backend.title()} chrome unavailable, using asset backend: {e}")
+
+    def _apply_chrome_regions(self, regions):
+        self.sidebar_rect = regions.sidebar.copy()
+        self.line_numbers_rect = regions.line_numbers.copy()
+        self.code_rect = regions.code.copy()
+        self.status_rect = regions.status.copy()
+        self.canvas_window_rect = regions.canvas_window.copy()
+        self.canvas_draw_rect = regions.canvas_content.copy()
+        self._bbs_window_rect = regions.bbs_window.copy()
+        self._bbs_draw_rect = regions.bbs_content.copy()
+        self.sidebar_x, self.sidebar_y = self.sidebar_rect.topleft
+        self.sidebar_w, self.sidebar_h = self.sidebar_rect.size
+        self.line_num_x, self.line_num_y = self.line_numbers_rect.topleft
+        self.line_num_w, self.line_num_h = self.line_numbers_rect.size
+        self.code_area_x, self.code_area_y = self.code_rect.topleft
+        self.code_area_w, self.code_area_h = self.code_rect.size
+        self.status_bar_x, self.status_bar_y = self.status_rect.topleft
+        self.status_bar_w, self.status_bar_h = self.status_rect.size
+
+    def _use_chrome_backend(self) -> bool:
+        return self._chrome_backend != "asset" and self._chrome is not None
+
+    @property
+    def canvas_size(self) -> tuple[int, int]:
+        return self.canvas_draw_rect.size
+
     def _load_canvas_assets(self):
         """Load the canvas.png popup window chrome."""
         if self.mock_mode:
+            return
+        if self._use_chrome_backend():
+            self.canvas_image = None
             return
         canvas_path = os.path.join(ASSETS_DIR, "canvas.png")
         if os.path.exists(canvas_path):
@@ -201,9 +249,9 @@ class Terminal:
             # pygame.image.load() preserves the PNG alpha channel already.
             self.canvas_image = pygame.image.load(canvas_path)
             # Scale canvas chrome to match display resolution
-            if self.canvas_image.get_size() != (config.CANVAS_W, config.CANVAS_H):
+            if self.canvas_image.get_size() != self.canvas_window_rect.size:
                 self.canvas_image = pygame.transform.scale(
-                    self.canvas_image, (config.CANVAS_W, config.CANVAS_H))
+                    self.canvas_image, self.canvas_window_rect.size)
             print(f"[Terminal] Loaded canvas chrome: {canvas_path}")
         else:
             print(f"[Terminal] Warning: canvas.png not found")
@@ -220,8 +268,7 @@ class Terminal:
 
     def show_canvas(self):
         """Show the canvas popup window and create the drawing surface."""
-        self.canvas_surface = pygame.Surface(
-            (config.CANVAS_DRAW_W, config.CANVAS_DRAW_H))
+        self.canvas_surface = pygame.Surface(self.canvas_draw_rect.size)
         self.canvas_surface.fill((0, 0, 0))
         self.canvas_visible = True
         self._dirty = True
@@ -263,8 +310,7 @@ class Terminal:
         elif char == '\b':
             self._backspace()
         elif char == '\t':
-            for _ in range(4):
-                self.type_char(' ', render=False)
+            self.type_indent(4, render=False)
         else:
             if self.cursor_x < self.cols:
                 line = self.lines[self.cursor_y]
@@ -275,6 +321,18 @@ class Terminal:
                 self.cursor_x += 1
             if self.cursor_x >= self.cols:
                 self._newline()
+        self._dirty = True
+        if render:
+            self._render()
+
+    def type_indent(self, columns: int = 4, render: bool = True):
+        """Insert indentation spaces with a single render."""
+        columns = int(columns)
+        if columns <= 0:
+            return
+
+        for _ in range(columns):
+            self.type_char(' ', render=False)
         self._dirty = True
         if render:
             self._render()
@@ -332,36 +390,52 @@ class Terminal:
         if self.mock_mode:
             return
 
-        # In BBS or screensaver mode, skip the IDE render
-        if self._bbs_mode or self._screensaver_mode:
+        with self._render_lock:
+            # In BBS or screensaver mode, skip the IDE render
+            if self._bbs_mode or self._screensaver_mode:
+                self._flip()
+                return
+
+            # 1. Draw background chrome
+            if self._use_chrome_backend():
+                self._chrome.draw_ide()
+            else:
+                self.screen.blit(self.bg_image, (0, 0))
+
+            # 2. Render sidebar file list
+            self._render_sidebar()
+
+            # 3. Render line numbers + code text
+            self._render_code()
+
+            # 4. Render cursor
+            self._render_cursor()
+
+            # 5. Render status bar
+            self._render_status()
+
+            # 6. Composite canvas popup on top (if visible)
+            if self.canvas_visible and self.canvas_surface:
+                if self._use_chrome_backend():
+                    self._chrome.draw_canvas_window()
+                    self.screen.blit(self.canvas_surface, self.canvas_draw_rect.topleft)
+                elif self.canvas_image:
+                    self.screen.blit(self.canvas_image, self.canvas_window_rect.topleft)
+                    self.screen.blit(self.canvas_surface, self.canvas_draw_rect.topleft)
+
+            # 7. Single flip to framebuffer
             self._flip()
-            return
 
-        # 1. Draw background image (title bar, toolbar, borders)
-        self.screen.blit(self.bg_image, (0, 0))
+    def get_screen_snapshot(self):
+        """Return a thread-safe copy of the latest fully-rendered screen.
 
-        # 2. Render sidebar file list
-        self._render_sidebar()
-
-        # 3. Render line numbers + code text
-        self._render_code()
-
-        # 4. Render cursor
-        self._render_cursor()
-
-        # 5. Render status bar
-        self._render_status()
-
-        # 6. Composite canvas popup on top (if visible)
-        if self.canvas_visible and self.canvas_image and self.canvas_surface:
-            self.screen.blit(self.canvas_image,
-                             (config.CANVAS_X, config.CANVAS_Y))
-            self.screen.blit(self.canvas_surface,
-                             (config.CANVAS_X + config.CANVAS_DRAW_OFFSET_X,
-                              config.CANVAS_Y + config.CANVAS_DRAW_OFFSET_Y))
-
-        # 7. Single flip to framebuffer
-        self._flip()
+        The lock is shared with _render(), so callers always observe a
+        complete frame instead of a partial render in progress.
+        """
+        if self.screen is None:
+            return None
+        with self._render_lock:
+            return self.screen.copy()
 
     def _render_sidebar(self):
         """Render the file list in the sidebar."""
@@ -399,6 +473,7 @@ class Terminal:
 
         for row, line in enumerate(self.lines):
             y = self.code_area_y + row * self.char_height
+            line_number_y = self.line_num_y + row * self.char_height
 
             if y + self.char_height > self.code_area_y + self.code_area_h:
                 break
@@ -406,7 +481,8 @@ class Terminal:
             line_num = total_lines_before + row + 1
             ln_text = f"{line_num:3d}"
             ln_surface = self.font.render(ln_text, True, (128, 128, 128))
-            self.screen.blit(ln_surface, (self.line_num_x, y))
+            if line_number_y + self.char_height <= self.line_num_y + self.line_num_h:
+                self.screen.blit(ln_surface, self._line_number_position(ln_surface, line_number_y))
 
             if line:
                 max_chars = self.cols
@@ -420,8 +496,10 @@ class Terminal:
         if self.cursor_enabled and self.cursor_visible:
             cx = self.code_area_x + self.cursor_x * self.char_width
             cy = self.code_area_y + self.cursor_y * self.char_height
-            if (cx < self.code_area_x + self.code_area_w and
-                    cy < self.code_area_y + self.code_area_h):
+            if (
+                cx < self.code_area_x + self.code_area_w
+                and cy < self.code_area_y + self.code_area_h
+            ):
                 cursor_rect = pygame.Rect(
                     cx, cy, self.char_width, self.char_height)
                 pygame.draw.rect(self.screen, self.color_fg, cursor_rect)
@@ -434,18 +512,52 @@ class Terminal:
             status += f" | Mood: {self.current_mood}"
 
         st_surface = self.font_bold.render(status, True, (0, 0, 0))
-        # Shift status text left by 210px (at 800w), scaled for other resolutions
-        shift = int(210 * config.DISPLAY_WIDTH / 800)
-        status_x = self.code_area_x + 30 - shift
-        status_y_offset = 1 if config._SY >= 1.5 else -2
-        status_y = self.status_bar_y + status_y_offset
-        self.screen.blit(st_surface, (status_x, status_y))
-
-        # Online count (right-aligned)
         online_text = f"{self._online_count} Online"
         online_surface = self.font_bold.render(online_text, True, (0, 0, 0))
-        online_x = config.DISPLAY_WIDTH - online_surface.get_width() - int(22 * config._SX)
-        self.screen.blit(online_surface, (online_x, status_y))
+        if self._use_chrome_backend():
+            status_pos, online_pos = self._status_positions(st_surface, online_surface)
+        else:
+            # Shift status text left by 210px (at 800w), scaled for other resolutions
+            shift = int(210 * config.DISPLAY_WIDTH / 800)
+            status_x = self.code_area_x + 30 - shift
+            status_y_offset = 1 if config._SY >= 1.5 else -2
+            status_y = self.status_bar_y + status_y_offset
+            status_pos = (status_x, status_y)
+
+            # Online count (right-aligned)
+            online_padding = int(22 * config._SX)
+            online_x = config.DISPLAY_WIDTH - online_surface.get_width() - online_padding
+            online_pos = (online_x, status_y)
+
+        self.screen.blit(st_surface, status_pos)
+        self.screen.blit(online_surface, online_pos)
+
+    def _line_number_position(self, text_surface: pygame.Surface, y: int) -> tuple[int, int]:
+        if not self._use_chrome_backend():
+            return self.line_num_x, y
+
+        x = self.line_num_x + self.line_num_w - text_surface.get_width()
+        return x, y
+
+    def _status_positions(
+        self,
+        status_surface: pygame.Surface,
+        online_surface: pygame.Surface,
+    ) -> tuple[tuple[int, int], tuple[int, int]]:
+        status_y = self.status_bar_y + max(
+            0,
+            (self.status_bar_h - status_surface.get_height()) // 2,
+        )
+        online_y = self.status_bar_y + max(
+            0,
+            (self.status_bar_h - online_surface.get_height()) // 2,
+        )
+        status_pos = (self.status_bar_x, status_y)
+        online_pos = (
+            self.status_bar_x + self.status_bar_w - online_surface.get_width(),
+            online_y,
+        )
+        return status_pos, online_pos
 
     def set_model_name(self, model_name: str):
         """Set the display name for the current model."""
@@ -494,39 +606,54 @@ class Terminal:
         if self.canvas_surface is None:
             return
 
-        target = self.canvas_surface
-
         try:
             parts = cmd_str.strip().split(':')[1].split(',')
             c = parts[0]
             args = [int(x) for x in parts[1:]]
-            if c == "CLEAR":
-                target.fill(tuple(args[:3]))
-            elif c == "PIXEL":
-                target.set_at((args[0], args[1]), tuple(args[2:]))
-            elif c == "LINE":
-                pygame.draw.line(
-                    target, tuple(args[4:]),
-                    (args[0], args[1]), (args[2], args[3]))
-            elif c == "RECT":
-                pygame.draw.rect(
-                    target, tuple(args[4:]),
-                    (args[0], args[1], args[2], args[3]), 1)
-            elif c == "FILLRECT":
-                pygame.draw.rect(
-                    target, tuple(args[4:]),
-                    (args[0], args[1], args[2], args[3]))
-            elif c == "CIRCLE":
-                pygame.draw.circle(
-                    target, tuple(args[3:]),
-                    (args[0], args[1]), args[2], 1)
-            elif c == "FILLCIRCLE":
-                pygame.draw.circle(
-                    target, tuple(args[3:]),
-                    (args[0], args[1]), args[2])
-            self._dirty = True  # Will be composited on next _render()
-        except Exception as e:
+            self._process_canvas_command(c, args)
+        except Exception:
             pass  # Silently ignore malformed commands
+
+    def process_draw_commands(self, commands):
+        """Process a batch of structured canvas drawing commands."""
+        if self.mock_mode or self.canvas_surface is None:
+            return
+
+        for command in commands:
+            try:
+                c = command[0]
+                args = [int(x) for x in command[1:]]
+                self._process_canvas_command(c, args)
+            except Exception:
+                pass
+
+    def _process_canvas_command(self, c: str, args: list[int]):
+        target = self.canvas_surface
+        if c == "CLEAR":
+            target.fill(tuple(args[:3]))
+        elif c == "PIXEL":
+            target.set_at((args[0], args[1]), tuple(args[2:]))
+        elif c == "LINE":
+            pygame.draw.line(
+                target, tuple(args[4:]),
+                (args[0], args[1]), (args[2], args[3]))
+        elif c == "RECT":
+            pygame.draw.rect(
+                target, tuple(args[4:]),
+                (args[0], args[1], args[2], args[3]), 1)
+        elif c == "FILLRECT":
+            pygame.draw.rect(
+                target, tuple(args[4:]),
+                (args[0], args[1], args[2], args[3]))
+        elif c == "CIRCLE":
+            pygame.draw.circle(
+                target, tuple(args[3:]),
+                (args[0], args[1]), args[2], 1)
+        elif c == "FILLCIRCLE":
+            pygame.draw.circle(
+                target, tuple(args[3:]),
+                (args[0], args[1]), args[2])
+        self._dirty = True  # Will be composited on next _render()
 
     # =========================================================================
     # Event handling and tick
@@ -560,6 +687,7 @@ class Terminal:
         if PYGAME_AVAILABLE and not self.mock_mode:
             if self.fb_writer:
                 self.fb_writer.clear(0, 0, 0)
+                self.fb_writer.close()
             pygame.quit()
 
     def check_ghosting_refresh(self):
@@ -579,7 +707,10 @@ class Terminal:
     def exit_screensaver_mode(self):
         """Leave screensaver, restore IDE background."""
         self._screensaver_mode = False
-        if not self.mock_mode and self.bg_image:
+        if not self.mock_mode and self._use_chrome_backend():
+            self._chrome.draw_ide()
+            self._flip(force=True)
+        elif not self.mock_mode and self.bg_image:
             self.screen.blit(self.bg_image, (0, 0))
             self._flip(force=True)
 
@@ -603,37 +734,40 @@ class Terminal:
         "  | | | | '_ \\| | | |  _ \\|  _ \\___ \\ ",
         "  | | | | | | | |_| | |_) | |_) |___) |",
         "  |_| |_|_| |_|\\__, |____/|____/|____/ ",
-        "               |___/  v0.1",
+        "               |___/  v" + config.VERSION,
     ]
 
     # Terminal window chrome — scaled from 800x480 reference
     @property
     def _BBS_CHROME_X(self):
-        return int(12 * self.width / 800)
+        return self._bbs_window_rect.x
 
     @property
     def _BBS_CHROME_Y(self):
-        return int(55 * self.height / 480)
+        return self._bbs_window_rect.y
 
     @property
     def _BBS_DRAW_OFFSET_X(self):
-        return int(5 * self.width / 800)
+        return self._bbs_draw_rect.x - self._bbs_window_rect.x
 
     @property
     def _BBS_DRAW_OFFSET_Y(self):
-        return int(32 * self.height / 480)
+        return self._bbs_draw_rect.y - self._bbs_window_rect.y
 
     @property
     def _BBS_DRAW_W(self):
-        return int(763 * self.width / 800)
+        return self._bbs_draw_rect.w
 
     @property
     def _BBS_DRAW_H(self):
-        return int(385 * self.height / 480)
+        return self._bbs_draw_rect.h
 
     def _load_terminal_assets(self):
         """Load Terminal.png chrome for BBS mode, scaled to display resolution."""
         if self.mock_mode:
+            return
+        if self._use_chrome_backend():
+            self._terminal_image = None
             return
         term_path = os.path.join(ASSETS_DIR, "Terminal.png")
         if os.path.exists(term_path):
@@ -685,7 +819,10 @@ class Terminal:
     def exit_bbs_mode(self):
         """Switch back to IDE display."""
         self._bbs_mode = False
-        if not self.mock_mode and self.bg_image:
+        if not self.mock_mode and self._use_chrome_backend():
+            self._chrome.draw_ide()
+            self._dirty = True
+        elif not self.mock_mode and self.bg_image:
             self.screen.blit(self.bg_image, (0, 0))
             self._dirty = True
 
@@ -695,13 +832,17 @@ class Terminal:
             return
         colors = self._bbs_colors()
 
-        # Draw the IDE background first (menu bar etc.)
-        self.screen.blit(self.bg_image, (0, 0))
+        if self._use_chrome_backend():
+            self._chrome.draw_ide()
+            self._chrome.draw_bbs_window()
+        else:
+            # Draw the IDE background first (menu bar etc.)
+            self.screen.blit(self.bg_image, (0, 0))
 
-        # Blit terminal chrome
-        if self._terminal_image:
-            self.screen.blit(self._terminal_image,
-                             (self._BBS_CHROME_X, self._BBS_CHROME_Y))
+            # Blit terminal chrome
+            if self._terminal_image:
+                self.screen.blit(self._terminal_image,
+                                 (self._BBS_CHROME_X, self._BBS_CHROME_Y))
 
         # Fill draw area with BBS background color
         draw_rect = pygame.Rect(self._bbs_x, self._bbs_y,
@@ -723,7 +864,7 @@ class Terminal:
             self.screen.blit(surf, (self._bbs_x + 8, y))
             y += self.char_height
 
-        # Notification text (orange) on the same line as v0.1
+        # Notification text (orange) on the same line as version
         notif = getattr(self, "_bbs_notification", None)
         if notif:
             last_line_y = y - self.char_height
