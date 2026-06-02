@@ -27,6 +27,7 @@ AVAILABLE_MODELS = {
     "x-ai/grok-code-fast-1": ("Grok Code Fast", "Grok"),
     "deepseek/deepseek-v3.2": ("DeepSeek V3.2", "DeepSeek"),
     # Cloud models (MiniMax) - require MINIMAX_API_KEY
+    "minimax/MiniMax-M3": ("MiniMax M3", "M3"),
     "minimax/MiniMax-M2.7": ("MiniMax M2.7", "M2.7"),
     "minimax/MiniMax-M2.7-highspeed": ("MiniMax M2.7 Highspeed", "M2.7-HS"),
     # Local models (Ollama) - require Ollama running locally
