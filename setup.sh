@@ -6,7 +6,16 @@ set -e
 
 REPO="https://github.com/cuneytozseker/TinyProgrammer.git"
 INSTALL_DIR="$HOME/TinyProgrammer"
-TAG="${TINYPROGRAMMER_TAG:-v0.1}"
+
+# Default to the latest published release tag; honor TINYPROGRAMMER_TAG override.
+# Falls back to main if the remote tag lookup fails (no network, etc.).
+if [[ -n "$TINYPROGRAMMER_TAG" ]]; then
+    TAG="$TINYPROGRAMMER_TAG"
+else
+    TAG=$(git ls-remote --tags --refs --sort='-v:refname' "$REPO" 'v*' 2>/dev/null \
+          | head -1 | sed 's|.*refs/tags/||')
+    TAG="${TAG:-main}"
+fi
 
 # Colors
 R='\033[0;31m'
